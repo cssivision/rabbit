@@ -5,7 +5,7 @@ authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/cssivision/looli-rs"
 homepage = "https://github.com/cssivision/looli-rs"
-description = "personal simple proxy in rust."
+description = "personal port of shadowsocks in rust."
 readme = "README.md"
 
 [dependencies]
