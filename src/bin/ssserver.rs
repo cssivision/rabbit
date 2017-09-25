@@ -1,6 +1,8 @@
-extern crate looli;
+extern crate shadowsocks_rs;
 
-use looli::config::Config;
+use shadowsocks_rs as shadowsocks;
+use shadowsocks::config::Config;
+use shadowsocks::resolver::resolve;
 
 fn main() {
     println!("{:?}", Config::new(""));

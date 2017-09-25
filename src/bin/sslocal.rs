@@ -2,15 +2,16 @@ extern crate futures;
 extern crate getopts;
 #[macro_use]
 extern crate log;
-extern crate looli;
+extern crate shadowsocks_rs;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_socks5;
 
 use std::env;
 
+use shadowsocks_rs as shadowsocks;
 use getopts::Options;
-use looli::config::Config;
+use shadowsocks::config::Config;
 use futures::{future, Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
