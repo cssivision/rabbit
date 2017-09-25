@@ -5,23 +5,19 @@ use std::env;
 
 use serde_json;
 
-static LOCAL_ADDR: &str = "0.0.0.0";
-static LOCAL_PORT: u32 = 6009;
-static SERVER_ADDR: &str = "0.0.0.0";
-static SERVER_PORT: u32 = 9006;
+static LOCAL_ADDR: &str = "0.0.0.0:6009";
+static SERVER_ADDR: &str = "0.0.0.0:9006";
 static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
 static TIMEOUT: u32 = 5;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Config {
-    local_addr: String,
-    local_port: u32,
-    server_addr: String,
-    server_port: u32,
-    password: String,
-    method: String,
-    timeout: u32,
+    pub local_addr: String,
+    pub server_addr: String,
+    pub password: String,
+    pub method: String,
+    pub timeout: u32,
 }
 
 impl Config {
@@ -49,27 +45,11 @@ impl Config {
             }
         }
 
-        if config.local_port == 0 {
-            config.local_port = if let Ok(port) = env::var("LOOLI_LOCAL_PORT") {
-                port.parse().expect("invalid local_port value")
-            } else {
-                LOCAL_PORT
-            }
-        }
-
         if config.server_addr.is_empty() {
             config.server_addr = if let Ok(addr) = env::var("LOOLI_SERVER_ADDR") {
                 addr
             } else {
                 SERVER_ADDR.to_string()
-            }
-        }
-
-        if config.server_port == 0 {
-            config.server_port = if let Ok(port) = env::var("LOOLI_SERVER_PORT") {
-                port.parse().expect("invalid server_port value")
-            } else {
-                SERVER_PORT
             }
         }
 
