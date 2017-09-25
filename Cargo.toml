@@ -3,8 +3,8 @@ name = "looli"
 version = "0.1.0"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/cssivision/looli-rs"
-homepage = "https://github.com/cssivision/looli-rs"
+repository = "https://github.com/cssivision/shadowsocks-rs"
+homepage = "https://github.com/cssivision/shadowsocks-rs"
 description = "personal port of shadowsocks in rust."
 readme = "README.md"
 
