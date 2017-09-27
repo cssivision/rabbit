@@ -1,5 +1,4 @@
 extern crate futures;
-extern crate getopts;
 #[macro_use]
 extern crate log;
 extern crate serde_json;
@@ -7,13 +6,12 @@ extern crate shadowsocks_rs;
 extern crate tokio_core;
 extern crate tokio_socks5;
 
-use std::env;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
-use getopts::Options;
 use shadowsocks_rs::config::Config;
-use shadowsocks_rs::io::{read_exact, write_all, copy};
+use shadowsocks_rs::io::{copy, read_exact, write_all};
+use shadowsocks_rs::args::parse_args;
 use futures::{Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
@@ -23,35 +21,10 @@ static TYPE_IPV6: u8 = 4;
 static TYPE_DOMAIN: u8 = 3;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    let mut opts = Options::new();
-    opts.optopt("c", "", "configuration path", "config");
-    opts.optflag("h", "help", "print this help");
-
-    let matches = match opts.parse(&args[1..]) {
-        Ok(m) => m,
-        Err(_) => {
-            print!("{}", opts.usage("Usage: sslocal -c PATH"));
-            return;
-        }
-    };
-
-    if matches.opt_present("h") {
-        print!("{}", opts.usage("Usage: sslocal -c PATH"));
-        return;
+    if let Some(config) = parse_args() {
+        println!("{}", serde_json::to_string_pretty(&config).unwrap());
+        run(config);
     }
-
-    let path = matches.opt_str("c").unwrap_or_default();
-    let config = match Config::new(path) {
-        Ok(c) => c,
-        Err(e) => {
-            println!("{}", e);
-            return;
-        }
-    };
-    println!("{}", serde_json::to_string_pretty(&config).unwrap());
-    run(config);
 }
 
 fn run(config: Config) {
