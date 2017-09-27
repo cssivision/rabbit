@@ -1,8 +1,7 @@
 extern crate shadowsocks_rs;
 
-use shadowsocks_rs as shadowsocks;
-use shadowsocks::config::Config;
-use shadowsocks::resolver::resolve;
+use shadowsocks_rs::config::Config;
+use shadowsocks_rs::resolver::resolve;
 
 fn main() {
     println!("{:?}", Config::new(""));
