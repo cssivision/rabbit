@@ -1,4 +1,3 @@
-extern crate bytes;
 extern crate futures;
 extern crate getopts;
 extern crate openssl;
@@ -16,4 +15,3 @@ pub mod io;
 pub mod util;
 pub mod args;
 pub mod cipher;
-pub mod tcpstream;

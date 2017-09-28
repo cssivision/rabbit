@@ -44,4 +44,24 @@ impl Cipher {
             data,
         )
     }
+
+    pub fn clone(&self) -> Cipher {
+        Cipher {
+            cipher: self.cipher.clone(),
+            key: self.key.clone(),
+            d_iv: self.d_iv.clone(),
+            e_iv: self.e_iv.clone(),
+            iv_len: self.iv_len,
+        }
+    }
+
+    pub fn reset(&self) -> Cipher {
+        Cipher {
+            cipher: self.cipher.clone(),
+            key: self.key.clone(),
+            d_iv: vec![],
+            e_iv: vec![],
+            iv_len: self.iv_len,
+        }
+    }
 }
