@@ -2,10 +2,10 @@ extern crate bytes;
 extern crate futures;
 extern crate getopts;
 extern crate openssl;
+extern crate rand;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-#[macro_use]
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate trust_dns_resolver;
