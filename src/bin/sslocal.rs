@@ -4,17 +4,20 @@ extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate tokio_socks5;
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
 use shadowsocks_rs::config::Config;
-use shadowsocks_rs::io::{copy, read_exact, write_all};
 use shadowsocks_rs::args::parse_args;
+use shadowsocks_rs::tcpstream;
+use shadowsocks_rs::cipher::Cipher;
 use futures::{Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
+use tokio_io::io::write_all;
 
 static TYPE_IPV4: u8 = 1;
 static TYPE_IPV6: u8 = 4;
@@ -43,7 +46,11 @@ fn run(config: Config) {
         println!("remote address: {}:{}", host, port);
         let rawaddr = generate_raw_addr(&host, port);
         let server_addr = config.server_addr.parse().expect("invalid server addr");
-        TcpStream::connect(&server_addr, &handle).and_then(|c2| write_all(c2, rawaddr));
+        TcpStream::connect(&server_addr, &handle).and_then(|c2| {
+            let cipher = Cipher::new(&config.method, &config.password);
+            let c2 = tcpstream::TcpStream::new(cipher, c2);
+            write_all(c2, rawaddr)
+        });
 
         Ok(())
     });
