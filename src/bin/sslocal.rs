@@ -4,20 +4,20 @@ extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
-extern crate tokio_io;
 extern crate tokio_socks5;
 
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use shadowsocks_rs::config::Config;
 use shadowsocks_rs::args::parse_args;
 use shadowsocks_rs::cipher::Cipher;
-use shadowsocks_rs::io::{copy, read_exact, write_all};
+use shadowsocks_rs::io::{write_all, DecryptReadCopy, EncryptWriteCopy};
 use futures::{Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
-use tokio_io::AsyncRead;
 
 static TYPE_IPV4: u8 = 1;
 static TYPE_IPV6: u8 = 4;
@@ -38,7 +38,7 @@ fn run(config: Config) {
 
     println!("Listening connections on {}", local_addr);
     let streams = listener.incoming().and_then(|(socket, addr)| {
-        debug!("{}", addr);
+        println!("{}", addr);
         tokio_socks5::serve(socket)
     });
 
@@ -46,17 +46,18 @@ fn run(config: Config) {
         println!("remote address: {}:{}", host, port);
         let rawaddr = generate_raw_addr(&host, port);
         let server_addr = config.server_addr.parse().expect("invalid server addr");
-        let cipher = Cipher::new(&config.method, &config.password);
+        let cipher = Rc::new(RefCell::new(Cipher::new(&config.method, &config.password)));
         let cipher_copy = cipher.clone();
         let pair = TcpStream::connect(&server_addr, &handle)
             .and_then(|c2| write_all(cipher_copy, c2, rawaddr).map(|c2| (c1, c2)));
 
         let pipe = pair.and_then(move |(c1, c2)| {
-            let (reader1, writer1) = c1.split();
-            let (reader2, writer2) = c2.split();
-            let half1 = copy(cipher.clone(), reader1, writer2);
-            let half2 = copy(cipher.clone(), reader2, writer1);
-            half1.join(half2).map(|(h1, h2)| (h1.0, h2.0))
+            let c1 = Rc::new(c1);
+            let c2 = Rc::new(c2);
+
+            let half1 = EncryptWriteCopy::new(c1.clone(), c2.clone(), cipher.clone());
+            let half2 = DecryptReadCopy::new(c2, c1, cipher.clone());
+            half1.join(half2)
         });
 
         let finish = pipe.map(|data| {
@@ -74,16 +75,20 @@ fn generate_raw_addr(host: &str, port: u16) -> Vec<u8> {
     if Ipv4Addr::from_str(host).is_ok() {
         let mut rawaddr = vec![TYPE_IPV4];
         rawaddr.extend_from_slice(host.as_bytes());
+        rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
         return rawaddr;
     }
 
     if Ipv6Addr::from_str(host).is_ok() {
         let mut rawaddr = vec![TYPE_IPV6];
         rawaddr.extend_from_slice(host.as_bytes());
+        rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
         return rawaddr;
     }
 
-    let mut rawaddr = vec![TYPE_DOMAIN, ((port >> 8) & 0xff) as u8, (port & 0xff) as u8];
+    let dm_len = host.as_bytes().len();
+    let mut rawaddr = vec![TYPE_DOMAIN, dm_len as u8];
     rawaddr.extend_from_slice(host.as_bytes());
+    rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
     return rawaddr;
 }
