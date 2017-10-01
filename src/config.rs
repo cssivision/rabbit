@@ -9,7 +9,7 @@ static LOCAL_ADDR: &str = "0.0.0.0:6009";
 static SERVER_ADDR: &str = "0.0.0.0:9006";
 static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
-static TIMEOUT: u32 = 5;
+static TIMEOUT: u64 = 5;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Config {
@@ -17,7 +17,7 @@ pub struct Config {
     pub server_addr: String,
     pub password: String,
     pub method: String,
-    pub timeout: u32,
+    pub timeout: u64,
 }
 
 impl Config {

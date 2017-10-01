@@ -2,9 +2,11 @@ extern crate env_logger;
 extern crate futures;
 #[macro_use]
 extern crate log;
+extern crate num_cpus;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
+extern crate tokio_timer;
 extern crate trust_dns_resolver;
 
 use std::io;
@@ -12,11 +14,13 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
+use std::time::Duration;
 
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use futures::{future, Future, Stream};
 use trust_dns_resolver::ResolverFuture;
+use tokio_timer::Timer;
 
 use shadowsocks_rs::config::Config;
 use shadowsocks_rs::resolver::resolve;
@@ -44,6 +48,7 @@ fn run(config: Config) {
     let listener = TcpListener::bind(&server_addr, &handle).unwrap();
     let cipher = Cipher::new(&config.method, &config.password);
     let resolver = ResolverFuture::from_system_conf(&handle).unwrap();
+    let timer = Timer::default();
 
     println!("Listening connections on {}", server_addr);
     let streams = listener.incoming().and_then(|(socket, addr)| {
@@ -74,7 +79,9 @@ fn run(config: Config) {
             debug!("received {} bytes, responsed {} bytes", data.0, data.1)
         }).map_err(|e| println!("{}", e));
 
-        handle.spawn(finish);
+        let timeout = timer.timeout(finish, Duration::new(config.timeout, 0));
+
+        handle.spawn(timeout);
         Ok(())
     });
 
