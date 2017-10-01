@@ -41,7 +41,6 @@ impl Future for DecryptReadExact {
     fn poll(&mut self) -> Poll<(Rc<TcpStream>, Vec<u8>), std_io::Error> {
         let mut cipher = self.cipher.borrow_mut();
         let mut reader = &*self.reader;
-
         if cipher.dec.is_none() {
             let mut iv = Vec::with_capacity(cipher.iv_len);
             unsafe {
