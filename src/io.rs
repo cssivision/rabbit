@@ -10,35 +10,68 @@ use tokio_core::net::TcpStream;
 use util::other;
 use cipher::Cipher;
 
-// pub fn read_exact(
-//     mut cipher: Cipher,
-//     a: TcpStream,
-//     buf: Vec<u8>,
-// ) -> Box<Future<Item = (TcpStream, Vec<u8>), Error = std_io::Error>> {
-//     let iv_len = if cipher.dec.is_none() {
-//         cipher.iv_len
-//     } else {
-//         0
-//     };
+pub struct DecryptReadExact {
+    cipher: Rc<RefCell<Cipher>>,
+    reader: Rc<TcpStream>,
+    buf: Vec<u8>,
+    pos: usize,
+}
 
-//     Box::new(io::read_exact(a, Vec::with_capacity(iv_len)).and_then(
-//         move |(c, b)| {
-//             if !b.is_empty() {
-//                 cipher.iv = b;
-//             }
-//             io::read_exact(c, Vec::with_capacity(buf.len())).and_then(move |(c, b)| {
-//                 let buf = match cipher.decrypt(&b) {
-//                     Ok(b) => b,
-//                     Err(e) => {
-//                         println!("encrypt error: {}", e);
-//                         return future::err(other("encrypt error!"));
-//                     }
-//                 };
-//                 future::ok((c, buf))
-//             })
-//         },
-//     ))
-// }
+pub fn read_exact(
+    cipher: Rc<RefCell<Cipher>>,
+    reader: Rc<TcpStream>,
+    buf: Vec<u8>,
+) -> DecryptReadExact {
+    DecryptReadExact {
+        reader: reader,
+        buf: buf,
+        pos: 0,
+        cipher: cipher,
+    }
+}
+
+fn eof() -> std_io::Error {
+    std_io::Error::new(std_io::ErrorKind::UnexpectedEof, "early eof")
+}
+
+impl Future for DecryptReadExact {
+    type Item = (Rc<TcpStream>, Vec<u8>);
+    type Error = std_io::Error;
+
+    fn poll(&mut self) -> Poll<(Rc<TcpStream>, Vec<u8>), std_io::Error> {
+        let mut cipher = self.cipher.borrow_mut();
+        let mut reader = &*self.reader;
+
+        if cipher.dec.is_none() {
+            let mut iv = Vec::with_capacity(cipher.iv_len);
+            unsafe {
+                iv.set_len(cipher.iv_len);
+            }
+            if let Async::Ready(t) = try_nb!(io::read_exact(reader, iv).poll()) {
+                cipher.iv = t.1.clone();
+                cipher.init_decrypt(&t.1);
+            }
+        }
+
+        while self.pos < self.buf.len() {
+            let n = try_nb!(reader.read(&mut self.buf[self.pos..]));
+            self.pos += n;
+            if n == 0 {
+                return Err(eof());
+            }
+        }
+
+        let a = match cipher.decrypt(&self.buf[..self.buf.len()]) {
+            Some(b) => b,
+            None => return Err(other("decrypt error")),
+        };
+        for i in 0..self.buf.len() {
+            self.buf[i] = a[i];
+        }
+
+        Ok(Async::Ready((self.reader.clone(), self.buf.clone())))
+    }
+}
 
 pub fn write_all(
     cipher: Rc<RefCell<Cipher>>,

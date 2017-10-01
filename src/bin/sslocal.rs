@@ -33,6 +33,7 @@ fn run(config: Config) {
     let handle = lp.handle();
     let local_addr = config.local_addr.parse().expect("invalid local addr");
     let listener = TcpListener::bind(&local_addr, &handle).unwrap();
+    let cipher = Cipher::new(&config.method, &config.password);
 
     println!("Listening connections on {}", local_addr);
     let streams = listener.incoming().and_then(|(socket, addr)| {
@@ -44,7 +45,7 @@ fn run(config: Config) {
         println!("remote address: {}:{}", host, port);
         let rawaddr = generate_raw_addr(&host, port);
         let server_addr = config.server_addr.parse().expect("invalid server addr");
-        let cipher = Rc::new(RefCell::new(Cipher::new(&config.method, &config.password)));
+        let cipher = Rc::new(RefCell::new(cipher.reset()));
         let cipher_copy = cipher.clone();
         let pair = TcpStream::connect(&server_addr, &handle)
             .and_then(|c2| write_all(cipher_copy, c2, rawaddr).map(|c2| (c1, c2)));
