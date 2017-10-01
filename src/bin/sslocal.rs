@@ -1,4 +1,7 @@
+extern crate env_logger;
 extern crate futures;
+#[macro_use]
+extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
@@ -22,6 +25,7 @@ static TYPE_IPV6: u8 = 4;
 static TYPE_DOMAIN: u8 = 3;
 
 fn main() {
+    env_logger::init().unwrap();
     if let Some(config) = parse_args() {
         println!("{}", serde_json::to_string_pretty(&config).unwrap());
         run(config);
@@ -37,12 +41,12 @@ fn run(config: Config) {
 
     println!("Listening connections on {}", local_addr);
     let streams = listener.incoming().and_then(|(socket, addr)| {
-        println!("{}", addr);
+        debug!("remote addr: {}", addr);
         tokio_socks5::serve(socket)
     });
 
     let server = streams.for_each(move |(c1, host, port)| {
-        println!("remote address: {}:{}", host, port);
+        println!("proxy to address: {}:{}", host, port);
         let rawaddr = generate_raw_addr(&host, port);
         let server_addr = config.server_addr.parse().expect("invalid server addr");
         let cipher = Rc::new(RefCell::new(cipher.reset()));
@@ -60,7 +64,7 @@ fn run(config: Config) {
         });
 
         let finish = pipe.map(|data| {
-            println!("received {} bytes, responsed {} bytes", data.0, data.1)
+            debug!("received {} bytes, responsed {} bytes", data.0, data.1)
         }).map_err(|e| println!("{}", e));
 
         handle.spawn(finish);

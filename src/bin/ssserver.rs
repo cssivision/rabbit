@@ -1,4 +1,7 @@
+extern crate env_logger;
 extern crate futures;
+#[macro_use]
+extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
@@ -27,6 +30,7 @@ const TYPE_IPV6: u8 = 4;
 const TYPE_DOMAIN: u8 = 3;
 
 fn main() {
+    env_logger::init().unwrap();
     if let Some(config) = parse_args() {
         println!("{}", serde_json::to_string_pretty(&config).unwrap());
         run(config);
@@ -42,14 +46,15 @@ fn run(config: Config) {
     let resolver = ResolverFuture::from_system_conf(&handle).unwrap();
 
     println!("Listening connections on {}", server_addr);
-    let streams = listener.incoming().and_then(|(socket, _)| {
+    let streams = listener.incoming().and_then(|(socket, addr)| {
+        debug!("remote address: {}", addr);
         let cipher = Rc::new(RefCell::new(cipher.reset()));
         get_addr_info(cipher.clone(), Rc::new(socket))
             .map(move |(c, host, port)| (c, host, port, cipher))
     });
 
     let server = streams.for_each(move |(c1, host, port, cipher)| {
-        println!("remote address: {}:{}", host, port);
+        println!("proxy to address: {}:{}", host, port);
         let handle1 = handle.clone();
 
         let look_up = resolve(&host, &resolver);
@@ -66,7 +71,7 @@ fn run(config: Config) {
         });
 
         let finish = pipe.map(|data| {
-            println!("received {} bytes, responsed {} bytes", data.0, data.1)
+            debug!("received {} bytes, responsed {} bytes", data.0, data.1)
         }).map_err(|e| println!("{}", e));
 
         handle.spawn(finish);
