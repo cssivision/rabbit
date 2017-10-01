@@ -58,13 +58,13 @@ impl Future for DecryptReadExact {
             }
         }
 
-        let a = match cipher.decrypt(&self.buf[..self.buf.len()]) {
+        let plain_data = match cipher.decrypt(&self.buf[..self.buf.len()]) {
             Some(b) => b,
             None => return Err(other("decrypt error")),
         };
-        for i in 0..self.buf.len() {
-            self.buf[i] = a[i];
-        }
+
+        let copy_len = self.buf.len();
+        self.buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
 
         Ok(Async::Ready((self.reader.clone(), self.buf.clone())))
     }
@@ -164,14 +164,12 @@ impl Future for DecryptReadCopy {
                 if n == 0 {
                     self.read_done = true;
                 } else {
-                    let a = match cipher.decrypt(&self.buf[..n]) {
+                    let plain_data = match cipher.decrypt(&self.buf[..n]) {
                         Some(b) => b,
                         None => return Err(other("decrypt error")),
                     };
-                    for i in 0..n {
-                        self.buf[i] = a[i];
-                    }
-                    // println!("{}", String::from_utf8_lossy(&self.buf[..n]));
+
+                    self.buf[..n].copy_from_slice(&plain_data[..n]);
                     self.pos = 0;
                     self.cap = n;
                 }
@@ -261,15 +259,12 @@ impl Future for EncryptWriteCopy {
                 if n == 0 {
                     self.read_done = true;
                 } else {
-                    let a = match cipher.encrypt(&self.buf[..n]) {
+                    let cipher_data = match cipher.encrypt(&self.buf[..n]) {
                         Some(b) => b,
                         None => return Err(other("encrypt error")),
                     };
 
-                    for i in 0..n {
-                        self.buf[i] = a[i];
-                    }
-
+                    self.buf[..n].copy_from_slice(&cipher_data[..n]);
                     self.pos = 0;
                     self.cap = n;
                 }
