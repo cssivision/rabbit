@@ -4,42 +4,41 @@ use std::cell::RefCell;
 use std::io::{Read, Write};
 
 use tokio_io::io;
-use futures::{future, Future, Poll};
-use rand::{thread_rng, Rng};
+use futures::{future, Async, Future, Poll};
 use tokio_core::net::TcpStream;
 
 use util::other;
 use cipher::Cipher;
 
-pub fn read_exact(
-    mut cipher: Cipher,
-    a: TcpStream,
-    buf: Vec<u8>,
-) -> Box<Future<Item = (TcpStream, Vec<u8>), Error = std_io::Error>> {
-    let iv_len = if cipher.d_iv.is_empty() {
-        cipher.iv_len
-    } else {
-        0
-    };
+// pub fn read_exact(
+//     mut cipher: Cipher,
+//     a: TcpStream,
+//     buf: Vec<u8>,
+// ) -> Box<Future<Item = (TcpStream, Vec<u8>), Error = std_io::Error>> {
+//     let iv_len = if cipher.dec.is_none() {
+//         cipher.iv_len
+//     } else {
+//         0
+//     };
 
-    Box::new(io::read_exact(a, Vec::with_capacity(iv_len)).and_then(
-        move |(c, b)| {
-            if !b.is_empty() {
-                cipher.d_iv = b;
-            }
-            io::read_exact(c, Vec::with_capacity(buf.len())).and_then(move |(c, b)| {
-                let buf = match cipher.decrypt(&b) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        println!("encrypt error: {}", e);
-                        return future::err(other("encrypt error!"));
-                    }
-                };
-                future::ok((c, buf))
-            })
-        },
-    ))
-}
+//     Box::new(io::read_exact(a, Vec::with_capacity(iv_len)).and_then(
+//         move |(c, b)| {
+//             if !b.is_empty() {
+//                 cipher.iv = b;
+//             }
+//             io::read_exact(c, Vec::with_capacity(buf.len())).and_then(move |(c, b)| {
+//                 let buf = match cipher.decrypt(&b) {
+//                     Ok(b) => b,
+//                     Err(e) => {
+//                         println!("encrypt error: {}", e);
+//                         return future::err(other("encrypt error!"));
+//                     }
+//                 };
+//                 future::ok((c, buf))
+//             })
+//         },
+//     ))
+// }
 
 pub fn write_all(
     cipher: Rc<RefCell<Cipher>>,
@@ -47,22 +46,21 @@ pub fn write_all(
     buf: Vec<u8>,
 ) -> Box<Future<Item = TcpStream, Error = std_io::Error>> {
     let mut cipher = cipher.borrow_mut();
-    if cipher.e_iv.is_empty() {
-        let mut rng = thread_rng();
-        cipher.e_iv = rng.gen_iter::<u8>()
-            .take(cipher.iv_len)
-            .collect::<Vec<u8>>();
-    }
+    let mut data = if cipher.enc.is_none() {
+        cipher.init_encrypt();
+        cipher.iv.clone()
+    } else {
+        vec![]
+    };
 
-    let mut data = cipher.e_iv.clone();
-    let buf = match cipher.encrypt(&buf) {
-        Ok(buf) => buf,
-        Err(e) => {
-            println!("encrypt error: {}", e);
+    let cipher_buf = match cipher.encrypt(&buf) {
+        Some(b) => Vec::from(&b[..buf.len()]),
+        None => {
+            println!("encrypt error");
             return Box::new(future::err(other("encrypt error!")));
         }
     };
-    data.extend_from_slice(&buf);
+    data.extend_from_slice(&cipher_buf);
 
     Box::new(io::write_all(a, data).and_then(|(c, _)| future::ok(c)))
 }
@@ -94,12 +92,11 @@ impl DecryptReadCopy {
         writer: Rc<TcpStream>,
         cipher: Rc<RefCell<Cipher>>,
     ) -> DecryptReadCopy {
-        let buffer = vec![0; 2 * 1024];
         DecryptReadCopy {
             cipher: cipher,
             reader: reader,
             writer: writer,
-            buf: buffer,
+            buf: vec![0; 2 * 1024],
             read_done: false,
             amt: 0,
             cap: 0,
@@ -120,9 +117,17 @@ impl Future for DecryptReadCopy {
         let mut writer = &*self.writer;
         let mut cipher = self.cipher.borrow_mut();
 
-        if cipher.d_iv.is_empty() {
-            try_nb!(io::read_exact(reader, &mut cipher.d_iv).poll());
+        if cipher.dec.is_none() {
+            let mut iv = Vec::with_capacity(cipher.iv_len);
+            unsafe {
+                iv.set_len(cipher.iv_len);
+            }
+            if let Async::Ready(t) = try_nb!(io::read_exact(reader, iv).poll()) {
+                cipher.iv = t.1.clone();
+                cipher.init_decrypt(&t.1);
+            }
         }
+
         loop {
             // If our buffer is empty, then we need to read some data to
             // continue.
@@ -131,10 +136,14 @@ impl Future for DecryptReadCopy {
                 if n == 0 {
                     self.read_done = true;
                 } else {
-                    self.buf = match cipher.decrypt(&self.buf) {
-                        Ok(b) => b,
-                        Err(_) => return Err(other("decrypt error")),
+                    let a = match cipher.decrypt(&self.buf[..n]) {
+                        Some(b) => b,
+                        None => return Err(other("decrypt error")),
                     };
+                    for i in 0..n {
+                        self.buf[i] = a[i];
+                    }
+                    // println!("{}", String::from_utf8_lossy(&self.buf[..n]));
                     self.pos = 0;
                     self.cap = n;
                 }
@@ -182,12 +191,11 @@ impl EncryptWriteCopy {
         writer: Rc<TcpStream>,
         cipher: Rc<RefCell<Cipher>>,
     ) -> EncryptWriteCopy {
-        let buffer = vec![0; 2 * 1024];
         EncryptWriteCopy {
             cipher: cipher,
             reader: reader,
             writer: writer,
-            buf: buffer,
+            buf: vec![0; 2 * 1024],
             read_done: false,
             amt: 0,
             cap: 0,
@@ -208,11 +216,13 @@ impl Future for EncryptWriteCopy {
         let mut writer = &*self.writer;
         let mut cipher = self.cipher.borrow_mut();
 
-        if cipher.e_iv.is_empty() {
-            let mut rng = thread_rng();
-            cipher.e_iv = rng.gen_iter::<u8>()
-                .take(cipher.iv_len)
-                .collect::<Vec<u8>>();
+        if cipher.enc.is_none() {
+            cipher.init_encrypt();
+            self.pos = 0;
+            self.cap = cipher.iv.len();
+            for i in 0..self.cap {
+                self.buf[i] = cipher.iv[i];
+            }
         }
 
         loop {
@@ -223,10 +233,15 @@ impl Future for EncryptWriteCopy {
                 if n == 0 {
                     self.read_done = true;
                 } else {
-                    self.buf = match cipher.encrypt(&self.buf) {
-                        Ok(b) => b,
-                        Err(_) => return Err(other("encrypt error")),
+                    let a = match cipher.encrypt(&self.buf[..n]) {
+                        Some(b) => b,
+                        None => return Err(other("encrypt error")),
                     };
+
+                    for i in 0..n {
+                        self.buf[i] = a[i];
+                    }
+
                     self.pos = 0;
                     self.cap = n;
                 }

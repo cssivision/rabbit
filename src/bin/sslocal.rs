@@ -1,6 +1,4 @@
 extern crate futures;
-#[macro_use]
-extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
@@ -62,7 +60,7 @@ fn run(config: Config) {
 
         let finish = pipe.map(|data| {
             println!("received {} bytes, responsed {} bytes", data.0, data.1)
-        }).map_err(|e| info!("{}", e));
+        }).map_err(|e| println!("{}", e));
 
         handle.spawn(finish);
         Ok(())
@@ -72,16 +70,16 @@ fn run(config: Config) {
 }
 
 fn generate_raw_addr(host: &str, port: u16) -> Vec<u8> {
-    if Ipv4Addr::from_str(host).is_ok() {
+    if let Ok(host) = Ipv4Addr::from_str(host) {
         let mut rawaddr = vec![TYPE_IPV4];
-        rawaddr.extend_from_slice(host.as_bytes());
+        rawaddr.extend_from_slice(&host.octets());
         rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
         return rawaddr;
     }
 
-    if Ipv6Addr::from_str(host).is_ok() {
+    if let Ok(host) = Ipv6Addr::from_str(host) {
         let mut rawaddr = vec![TYPE_IPV6];
-        rawaddr.extend_from_slice(host.as_bytes());
+        rawaddr.extend_from_slice(&host.octets());
         rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
         return rawaddr;
     }
