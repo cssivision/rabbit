@@ -42,8 +42,7 @@ fn run(config: Config) {
     let resolver = ResolverFuture::from_system_conf(&handle).unwrap();
 
     println!("Listening connections on {}", server_addr);
-    let streams = listener.incoming().and_then(|(socket, addr)| {
-        println!("{}", addr);
+    let streams = listener.incoming().and_then(|(socket, _)| {
         let cipher = Rc::new(RefCell::new(cipher.reset()));
         get_addr_info(cipher.clone(), Rc::new(socket))
             .map(move |(c, host, port)| (c, host, port, cipher))

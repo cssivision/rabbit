@@ -57,10 +57,7 @@ impl Cipher {
 
     pub fn encrypt(&mut self, input: &[u8]) -> Option<Vec<u8>> {
         let reserve_len = input.len() + self.cipher.block_size();
-        let mut out = Vec::with_capacity(reserve_len);
-        unsafe {
-            out.set_len(reserve_len);
-        }
+        let mut out = vec![0u8; reserve_len];
         if let Some(ref mut enc) = self.enc {
             if enc.update(input, &mut out).is_ok() {
                 return Some(out);
@@ -71,10 +68,7 @@ impl Cipher {
 
     pub fn decrypt(&mut self, input: &[u8]) -> Option<Vec<u8>> {
         let reserve_len = input.len() + self.cipher.block_size();
-        let mut out = Vec::with_capacity(reserve_len);
-        unsafe {
-            out.set_len(reserve_len);
-        }
+        let mut out = vec![0u8; reserve_len];
 
         if let Some(ref mut dec) = self.dec {
             if dec.update(input, &mut out).is_ok() {

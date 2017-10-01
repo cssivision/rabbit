@@ -42,11 +42,9 @@ impl Future for DecryptReadExact {
         let mut cipher = self.cipher.borrow_mut();
         let mut reader = &*self.reader;
         if cipher.dec.is_none() {
-            let mut iv = Vec::with_capacity(cipher.iv_len);
-            unsafe {
-                iv.set_len(cipher.iv_len);
-            }
-            if let Async::Ready(t) = try_nb!(io::read_exact(reader, iv).poll()) {
+            if let Async::Ready(t) =
+                try_nb!(io::read_exact(reader, vec![0u8; cipher.iv_len]).poll())
+            {
                 cipher.iv = t.1.clone();
                 cipher.init_decrypt(&t.1);
             }
@@ -150,11 +148,9 @@ impl Future for DecryptReadCopy {
         let mut cipher = self.cipher.borrow_mut();
 
         if cipher.dec.is_none() {
-            let mut iv = Vec::with_capacity(cipher.iv_len);
-            unsafe {
-                iv.set_len(cipher.iv_len);
-            }
-            if let Async::Ready(t) = try_nb!(io::read_exact(reader, iv).poll()) {
+            if let Async::Ready(t) =
+                try_nb!(io::read_exact(reader, vec![0u8; cipher.iv_len]).poll())
+            {
                 cipher.iv = t.1.clone();
                 cipher.init_decrypt(&t.1);
             }
