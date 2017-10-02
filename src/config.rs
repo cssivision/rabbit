@@ -38,7 +38,7 @@ impl Config {
         }
 
         if config.local_addr.is_empty() {
-            config.local_addr = if let Ok(addr) = env::var("LOOLI_LOCAL_ADDR") {
+            config.local_addr = if let Ok(addr) = env::var("SHADOWSOCKS_LOCAL_ADDR") {
                 addr
             } else {
                 LOCAL_ADDR.to_string()
@@ -46,7 +46,7 @@ impl Config {
         }
 
         if config.server_addr.is_empty() {
-            config.server_addr = if let Ok(addr) = env::var("LOOLI_SERVER_ADDR") {
+            config.server_addr = if let Ok(addr) = env::var("SHADOWSOCKS_SERVER_ADDR") {
                 addr
             } else {
                 SERVER_ADDR.to_string()
@@ -54,7 +54,7 @@ impl Config {
         }
 
         if config.password.is_empty() {
-            config.password = if let Ok(addr) = env::var("LOOLI_PASSWORD") {
+            config.password = if let Ok(addr) = env::var("SHADOWSOCKS_PASSWORD") {
                 addr
             } else {
                 PASSWORD.to_string()
@@ -62,7 +62,7 @@ impl Config {
         }
 
         if config.method.is_empty() {
-            config.method = if let Ok(addr) = env::var("LOOLI_METHOD") {
+            config.method = if let Ok(addr) = env::var("SHADOWSOCKS_METHOD") {
                 addr
             } else {
                 METHOD.to_string()
@@ -70,7 +70,7 @@ impl Config {
         }
 
         if config.timeout == 0 {
-            config.timeout = if let Ok(timeout) = env::var("LOOLI_TIMEOUT") {
+            config.timeout = if let Ok(timeout) = env::var("SHADOWSOCKS_TIMEOUT") {
                 timeout.parse().expect("invalid timeout value")
             } else {
                 TIMEOUT
