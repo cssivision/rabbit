@@ -116,22 +116,20 @@ pub struct DecryptReadCopy {
     read_done: bool,
 }
 
-impl DecryptReadCopy {
-    pub fn new(
-        reader: Rc<TcpStream>,
-        writer: Rc<TcpStream>,
-        cipher: Rc<RefCell<Cipher>>,
-    ) -> DecryptReadCopy {
-        DecryptReadCopy {
-            cipher: cipher,
-            reader: reader,
-            writer: writer,
-            buf: vec![0; 2 * 1024],
-            read_done: false,
-            amt: 0,
-            cap: 0,
-            pos: 0,
-        }
+pub fn decrypt_copy(
+    reader: Rc<TcpStream>,
+    writer: Rc<TcpStream>,
+    cipher: Rc<RefCell<Cipher>>,
+) -> DecryptReadCopy {
+    DecryptReadCopy {
+        cipher: cipher,
+        reader: reader,
+        writer: writer,
+        buf: vec![0; 2 * 1024],
+        read_done: false,
+        amt: 0,
+        cap: 0,
+        pos: 0,
     }
 }
 
@@ -211,22 +209,20 @@ pub struct EncryptWriteCopy {
     read_done: bool,
 }
 
-impl EncryptWriteCopy {
-    pub fn new(
-        reader: Rc<TcpStream>,
-        writer: Rc<TcpStream>,
-        cipher: Rc<RefCell<Cipher>>,
-    ) -> EncryptWriteCopy {
-        EncryptWriteCopy {
-            cipher: cipher,
-            reader: reader,
-            writer: writer,
-            buf: vec![0; 2 * 1024],
-            read_done: false,
-            amt: 0,
-            cap: 0,
-            pos: 0,
-        }
+pub fn encrypt_copy(
+    reader: Rc<TcpStream>,
+    writer: Rc<TcpStream>,
+    cipher: Rc<RefCell<Cipher>>,
+) -> EncryptWriteCopy {
+    EncryptWriteCopy {
+        cipher: cipher,
+        reader: reader,
+        writer: writer,
+        buf: vec![0; 2 * 1024],
+        read_done: false,
+        amt: 0,
+        cap: 0,
+        pos: 0,
     }
 }
 

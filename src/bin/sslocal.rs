@@ -15,7 +15,7 @@ use std::cell::RefCell;
 use shadowsocks_rs::config::Config;
 use shadowsocks_rs::args::parse_args;
 use shadowsocks_rs::cipher::Cipher;
-use shadowsocks_rs::io::{write_all, DecryptReadCopy, EncryptWriteCopy};
+use shadowsocks_rs::io::{decrypt_copy, encrypt_copy, write_all};
 use futures::{Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
@@ -58,8 +58,8 @@ fn run(config: Config) {
             let c1 = Rc::new(c1);
             let c2 = Rc::new(c2);
 
-            let half1 = EncryptWriteCopy::new(c1.clone(), c2.clone(), cipher.clone());
-            let half2 = DecryptReadCopy::new(c2, c1, cipher.clone());
+            let half1 = encrypt_copy(c1.clone(), c2.clone(), cipher.clone());
+            let half2 = decrypt_copy(c2, c1, cipher.clone());
             half1.join(half2)
         });
 

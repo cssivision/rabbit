@@ -27,7 +27,7 @@ use shadowsocks_rs::resolver::resolve;
 use shadowsocks_rs::cipher::Cipher;
 use shadowsocks_rs::args::parse_args;
 use shadowsocks_rs::util::other;
-use shadowsocks_rs::io::{read_exact, DecryptReadCopy, EncryptWriteCopy};
+use shadowsocks_rs::io::{decrypt_copy, encrypt_copy, read_exact};
 
 const TYPE_IPV4: u8 = 1;
 const TYPE_IPV6: u8 = 4;
@@ -70,8 +70,8 @@ fn run(config: Config) {
         let pipe = pair.and_then(move |(c1, c2)| {
             let c2 = Rc::new(c2);
 
-            let half1 = EncryptWriteCopy::new(c2.clone(), c1.clone(), cipher.clone());
-            let half2 = DecryptReadCopy::new(c1, c2, cipher.clone());
+            let half1 = encrypt_copy(c2.clone(), c1.clone(), cipher.clone());
+            let half2 = decrypt_copy(c1, c2, cipher.clone());
             half1.join(half2)
         });
 
