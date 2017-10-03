@@ -65,7 +65,7 @@ fn run(config: Config) {
 
         let finish = pipe.map(|data| {
             debug!("received {} bytes, responsed {} bytes", data.0, data.1)
-        }).map_err(|e| println!("{}", e));
+        }).map_err(|e| println!("error: {}", e));
 
         handle.spawn(finish);
         Ok(())
