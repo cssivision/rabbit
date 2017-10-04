@@ -1,13 +1,14 @@
 use std::net::IpAddr;
 use std::io;
 use std::str::FromStr;
+use std::rc::Rc;
 
 use futures::{future, Future};
 use trust_dns_resolver::ResolverFuture;
 
 pub fn resolve(
     host: &str,
-    resolver: &ResolverFuture,
+    resolver: Rc<ResolverFuture>,
 ) -> Box<Future<Item = IpAddr, Error = io::Error>> {
     if let Ok(addr) = IpAddr::from_str(&host) {
         return Box::new(future::ok(addr));

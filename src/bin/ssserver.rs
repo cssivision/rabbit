@@ -46,25 +46,29 @@ fn run(config: Config) {
     let handle = lp.handle();
     let server_addr = config.server_addr.parse().expect("invalid local addr");
     let listener = TcpListener::bind(&server_addr, &handle).unwrap();
+    let resolver = Rc::new(ResolverFuture::from_system_conf(&handle).unwrap());
     let cipher = Cipher::new(&config.method, &config.password);
-    let resolver = ResolverFuture::from_system_conf(&handle).unwrap();
     let timer = Timer::default();
 
     println!("Listening connections on {}", server_addr);
-    let streams = listener.incoming().and_then(|(socket, addr)| {
+
+    let server = listener.incoming().for_each(move |(socket, addr)| {
         debug!("remote address: {}", addr);
         let cipher = Rc::new(RefCell::new(cipher.reset()));
-        get_addr_info(cipher.clone(), Rc::new(socket))
-            .map(move |(c, host, port)| (c, host, port, cipher))
-    });
+        let address_info =
+            get_addr_info(cipher.clone(), Rc::new(socket)).map(move |(c, host, port)| {
+                println!("proxy to address: {}:{}", host, port);
+                (c, host, port)
+            });
 
-    let server = streams.for_each(move |(c1, host, port, cipher)| {
-        println!("proxy to address: {}:{}", host, port);
-        let handle1 = handle.clone();
+        let resolver = resolver.clone();
+        let look_up = address_info.and_then(move |(c, host, port)| {
+            resolve(&host, resolver).map(move |addr| (c, addr, port))
+        });
 
-        let look_up = resolve(&host, &resolver);
-        let pair = look_up.and_then(move |addr| {
-            TcpStream::connect(&SocketAddr::new(addr, port), &handle1).map(|c2| (c1, c2))
+        let handle_copy = handle.clone();
+        let pair = look_up.and_then(move |(c1, addr, port)| {
+            TcpStream::connect(&SocketAddr::new(addr, port), &handle_copy).map(|c2| (c1, c2))
         });
 
         let pipe = pair.and_then(move |(c1, c2)| {
