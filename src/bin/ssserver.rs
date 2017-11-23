@@ -2,7 +2,6 @@ extern crate env_logger;
 extern crate futures;
 #[macro_use]
 extern crate log;
-extern crate num_cpus;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
