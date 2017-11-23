@@ -46,7 +46,7 @@ fn run(config: Config) {
     let handle = lp.handle();
     let server_addr = config.server_addr.parse().expect("invalid local addr");
     let listener = TcpListener::bind(&server_addr, &handle).unwrap();
-    let resolver = Rc::new(ResolverFuture::from_system_conf(&handle).unwrap());
+    let resolver = Rc::new(ResolverFuture::from_system_conf(&handle).expect("init resolver fail"));
     let cipher = Cipher::new(&config.method, &config.password);
     let timer = Timer::default();
 
@@ -68,6 +68,7 @@ fn run(config: Config) {
 
         let handle_copy = handle.clone();
         let pair = look_up.and_then(move |(c1, addr, port)| {
+            println!("resolver addr to ip: {}", addr);
             TcpStream::connect(&SocketAddr::new(addr, port), &handle_copy).map(|c2| (c1, c2))
         });
 

@@ -15,13 +15,15 @@ pub fn resolve(
     }
 
     let look_up = resolver.lookup_ip(&host);
-    let res = look_up.and_then(move |res| if let Some(addr) = res.iter().next() {
-        future::ok(addr)
-    } else {
-        future::err(io::Error::new(
-            io::ErrorKind::Other,
-            "resolve fail".to_string(),
-        ))
+    let res = look_up.and_then(move |res| {
+        if let Some(addr) = res.iter().filter(|addr| addr.is_ipv4()).next() {
+            future::ok(addr)
+        } else {
+            future::err(io::Error::new(
+                io::ErrorKind::Other,
+                "resolve fail".to_string(),
+            ))
+        }
     });
 
     Box::new(res)
