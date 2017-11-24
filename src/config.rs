@@ -11,7 +11,7 @@ static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
 static TIMEOUT: u64 = 100;
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Config {
     pub local_addr: String,
     pub server_addr: String,

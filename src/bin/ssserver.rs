@@ -2,6 +2,7 @@ extern crate env_logger;
 extern crate futures;
 #[macro_use]
 extern crate log;
+extern crate num_cpus;
 extern crate serde_json;
 extern crate shadowsocks_rs;
 extern crate tokio_core;
@@ -10,12 +11,15 @@ extern crate trust_dns_resolver;
 
 use std::io;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{self, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::time::Duration;
+use std::thread;
 
-use tokio_core::net::{TcpListener, TcpStream};
+use futures::sync::mpsc;
+use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use futures::{future, Future, Stream};
 use trust_dns_resolver::ResolverFuture;
@@ -34,26 +38,46 @@ const TYPE_DOMAIN: u8 = 3;
 
 fn main() {
     env_logger::init().unwrap();
-    if let Some(config) = parse_args() {
-        println!("{}", serde_json::to_string_pretty(&config).unwrap());
-        run(config);
+    let config = parse_args().expect("invalid config");
+    println!("{}", serde_json::to_string_pretty(&config).unwrap());
+    let num_threads = num_cpus::get();
+    let listener = net::TcpListener::bind(&config.server_addr).expect("failed to bind");
+
+    let mut channels = Vec::new();
+    let config = Arc::new(config);
+    for _ in 0..num_threads {
+        let c = config.clone();
+        let (tx, rx) = mpsc::unbounded();
+        channels.push(tx);
+        thread::spawn(|| worker(rx, c));
+    }
+
+     // Infinitely accept sockets from our `std::net::TcpListener`, as this'll do
+    // blocking I/O. Each socket is then shipped round-robin to a particular
+    // thread which will associate the socket with the corresponding event loop
+    // and process the connection.
+    let mut next = 0;
+    for socket in listener.incoming() {
+        if let Ok(socket) = socket {
+            channels[next].unbounded_send(socket).expect("worker thread died");
+            next = (next + 1) % num_threads;
+        }
     }
 }
 
-fn run(config: Config) {
+fn worker(rx: mpsc::UnboundedReceiver<net::TcpStream>, config: Arc<Config>) {
     let mut lp = Core::new().unwrap();
     let handle = lp.handle();
-    let server_addr = config.server_addr.parse().expect("invalid local addr");
-    let listener = TcpListener::bind(&server_addr, &handle).unwrap();
     let resolver = Rc::new(ResolverFuture::from_system_conf(&handle).expect("init resolver fail"));
     let cipher = Cipher::new(&config.method, &config.password);
     let timer = Timer::default();
 
-    println!("Listening connections on {}", server_addr);
-
-    let server = listener.incoming().for_each(move |(socket, addr)| {
-        debug!("remote address: {}", addr);
+    let server = rx.for_each(move |socket| {
         let cipher = Rc::new(RefCell::new(cipher.reset()));
+        let addr = socket.peer_addr().expect("failed to get remote address");
+        debug!("remote address: {}", addr);
+        let socket = TcpStream::from_stream(socket, &handle)
+            .expect("failed to associate TCP stream");
         let address_info =
             get_addr_info(cipher.clone(), Rc::new(socket)).map(move |(c, host, port)| {
                 println!("proxy to address: {}:{}", host, port);
@@ -67,7 +91,7 @@ fn run(config: Config) {
 
         let handle_copy = handle.clone();
         let pair = look_up.and_then(move |(c1, addr, port)| {
-            println!("resolver addr to ip: {}", addr);
+            debug!("resolver addr to ip: {}", addr);
             TcpStream::connect(&SocketAddr::new(addr, port), &handle_copy).map(|c2| (c1, c2))
         });
 
