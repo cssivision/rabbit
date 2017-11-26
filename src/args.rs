@@ -1,4 +1,5 @@
 use std::env;
+use std::process;
 
 use config::Config;
 use getopts::Options;
@@ -20,7 +21,7 @@ pub fn parse_args() -> Option<Config> {
 
     if matches.opt_present("h") {
         print!("{}", opts.usage("Usage: sslocal -c PATH"));
-        return None;
+        process::exit(0);
     }
 
     let path = matches.opt_str("c").unwrap_or_default();
