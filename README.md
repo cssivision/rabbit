@@ -35,4 +35,3 @@ install a [client](https://shadowsocks.org/en/download/clients.html), connect to
 # Licenses
 
 All source code is licensed under the [MIT License](https://github.com/cssivision/shadowsocks-rs/blob/master/LICENSE).
-
