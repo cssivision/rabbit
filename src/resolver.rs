@@ -1,6 +1,5 @@
 use std::net::IpAddr;
 use std::io;
-use std::str::FromStr;
 use std::rc::Rc;
 
 use futures::{future, Future};
@@ -10,21 +9,21 @@ pub fn resolve(
     host: &str,
     resolver: Rc<ResolverFuture>,
 ) -> Box<Future<Item = IpAddr, Error = io::Error>> {
-    if let Ok(addr) = IpAddr::from_str(&host) {
-        return Box::new(future::ok(addr));
-    }
-
     let look_up = resolver.lookup_ip(&host);
-    let res = look_up.and_then(move |res| {
-        if let Some(addr) = res.iter().filter(|addr| addr.is_ipv4()).next() {
-            future::ok(addr)
-        } else {
-            future::err(io::Error::new(
-                io::ErrorKind::Other,
-                "resolve fail".to_string(),
-            ))
+    let res = look_up.then(move |res| {
+        match res {
+            Ok(r) => if let Some(addr) = r.iter().next() {
+                future::ok(addr)
+            } else {
+                future::err(other_err("no ip return"))
+            },
+            Err(_) => future::err(other_err("resolve fail")),
         }
     });
 
     Box::new(res)
+}
+
+fn other_err(msg: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, msg)
 }
