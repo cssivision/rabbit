@@ -9,8 +9,7 @@ pub fn resolve(
     host: &str,
     resolver: Rc<ResolverFuture>,
 ) -> Box<Future<Item = IpAddr, Error = io::Error>> {
-    let look_up = resolver.lookup_ip(&host);
-    let res = look_up.then(move |res| {
+    let res = resolver.lookup_ip(&host).then(move |res| {
         match res {
             Ok(r) => if let Some(addr) = r.iter().next() {
                 future::ok(addr)
