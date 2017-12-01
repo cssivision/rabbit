@@ -5,6 +5,8 @@ use std::rc::Rc;
 use futures::{future, Future};
 use trust_dns_resolver::ResolverFuture;
 
+use util::other;
+
 pub fn resolve(
     host: &str,
     resolver: Rc<ResolverFuture>,
@@ -14,15 +16,11 @@ pub fn resolve(
             Ok(r) => if let Some(addr) = r.iter().next() {
                 future::ok(addr)
             } else {
-                future::err(other_err("no ip return"))
+                future::err(other("no ip return"))
             },
-            Err(_) => future::err(other_err("resolve fail")),
+            Err(_) => future::err(other("resolve fail")),
         }
     });
 
     Box::new(res)
-}
-
-fn other_err(msg: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, msg)
 }
