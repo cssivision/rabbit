@@ -4,6 +4,8 @@ extern crate md5;
 extern crate openssl;
 extern crate rand;
 #[macro_use]
+extern crate log;
+#[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
 #[macro_use]

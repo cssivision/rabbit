@@ -86,13 +86,13 @@ pub fn write_all(
     let cipher_buf = match cipher.encrypt(&buf) {
         Some(b) => Vec::from(&b[..buf.len()]),
         None => {
-            println!("encrypt error");
+            error!("encrypt error");
             return Box::new(future::err(other("encrypt error!")));
         }
     };
     data.extend_from_slice(&cipher_buf);
 
-    Box::new(io::write_all(a, data).and_then(|(c, _)| future::ok(c)))
+    Box::new(io::write_all(a, data).map(|(c, _)| c))
 }
 
 /// A future representing reading all data from one side of a proxy connection
