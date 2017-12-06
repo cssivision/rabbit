@@ -122,22 +122,20 @@ fn get_addr_info(
 ) -> Box<Future<Item = (Rc<TcpStream>, String, u16), Error = io::Error>> {
     let cipher_copy = cipher.clone();
     let address_type = read_exact(cipher_copy.clone(), conn, vec![0u8; 1]);
-    let address = mybox(address_type.and_then(move |(c, buf)| {
+    let address = address_type.and_then(move |(c, buf)| {
         match buf[0] {
             // For IPv4 addresses, we read the 4 bytes for the address as
             // well as 2 bytes for the port.
-            TYPE_IPV4 => mybox(read_exact(cipher.clone(), c, vec![0u8; 6]).and_then(
-                |(c, buf)| {
+            TYPE_IPV4 => mybox(read_exact(cipher.clone(), c, vec![0u8; 6]).map(|(c, buf)| {
                     let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
                     let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
-                    mybox(future::ok((c, format!("{}", addr), port)))
+                    (c, format!("{}", addr), port)
                 },
             )),
 
             // For IPv6 addresses there's 16 bytes of an address plus two
             // bytes for a port, so we read that off and then keep going.
-            TYPE_IPV6 => mybox(read_exact(cipher.clone(), c, vec![0u8; 18]).and_then(
-                |(conn, buf)| {
+            TYPE_IPV6 => mybox(read_exact(cipher.clone(), c, vec![0u8; 18]).map(|(conn, buf)| {
                     let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
                     let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
                     let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
@@ -148,7 +146,7 @@ fn get_addr_info(
                     let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
                     let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
                     let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
-                    mybox(future::ok((conn, format!("{}", addr), port)))
+                    (conn, format!("{}", addr), port)
                 },
             )),
 
@@ -164,21 +162,21 @@ fn get_addr_info(
                         let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                             hostname
                         } else {
-                            return mybox(future::err(other("hostname include invalid utf8")));
+                            return future::err(other("hostname include invalid utf8"));
                         };
 
                         let pos = buf.len() - 2;
                         let port = ((buf[pos] as u16) << 8) | (buf[pos + 1] as u16);
-                        mybox(future::ok((conn, hostname.to_string(), port)))
+                        future::ok((conn, hostname.to_string(), port))
                     }),
             ),
             n => {
-                println!("unknown address type, received: {}", n);
+                error!("unknown address type, received: {}", n);
                 mybox(future::err(other("unknown address type, received")))
             }
         }
-    }));
-    address
+    });
+    mybox(address)
 }
 
 fn mybox<F: Future + 'static>(f: F) -> Box<Future<Item = F::Item, Error = F::Error>> {
