@@ -79,7 +79,7 @@ fn worker(rx: mpsc::UnboundedReceiver<net::TcpStream>, config: Arc<Config>) {
         let socket = TcpStream::from_stream(socket, &handle)
             .expect("failed to associate TCP stream");
         let address_info =
-            get_addr_info(cipher.clone(), Rc::new(socket)).map(move |(c, host, port)| {
+            get_addr_info(cipher.clone(), socket).map(move |(c, host, port)| {
                 println!("proxy to address: {}:{}", host, port);
                 (c, host, port)
             });
@@ -96,6 +96,7 @@ fn worker(rx: mpsc::UnboundedReceiver<net::TcpStream>, config: Arc<Config>) {
         });
 
         let pipe = pair.and_then(move |(c1, c2)| {
+            let c1 = Rc::new(c1);
             let c2 = Rc::new(c2);
 
             let half1 = encrypt_copy(c2.clone(), c1.clone(), cipher.clone());
@@ -118,8 +119,8 @@ fn worker(rx: mpsc::UnboundedReceiver<net::TcpStream>, config: Arc<Config>) {
 
 fn get_addr_info(
     cipher: Rc<RefCell<Cipher>>,
-    conn: Rc<TcpStream>,
-) -> Box<Future<Item = (Rc<TcpStream>, String, u16), Error = io::Error>> {
+    conn: TcpStream,
+) -> Box<Future<Item = (TcpStream, String, u16), Error = io::Error>> {
     let cipher_copy = cipher.clone();
     let address_type = read_exact(cipher_copy.clone(), conn, vec![0u8; 1]);
     let address = address_type.and_then(move |(c, buf)| {

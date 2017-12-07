@@ -52,7 +52,7 @@ fn run(config: Config) {
         let cipher = Rc::new(RefCell::new(cipher.reset()));
         let cipher_copy = cipher.clone();
         let pair = TcpStream::connect(&server_addr, &handle)
-            .and_then(|c2| write_all(cipher_copy, c2, rawaddr).map(|c2| (c1, c2)));
+            .and_then(|c2| write_all(cipher_copy, c2, rawaddr).map(|(c2, _)| (c1, c2)));
 
         let pipe = pair.and_then(move |(c1, c2)| {
             let c1 = Rc::new(c1);
