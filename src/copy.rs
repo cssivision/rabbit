@@ -12,13 +12,7 @@ use cipher::Cipher;
 
 
 /// A future representing reading all data from one side of a proxy connection
-/// and writing it to another.
-///
-/// This future, unlike the handshake performed above, is implemented via a
-/// custom implementation of the `Future` trait rather than with combinators.
-/// This is intended to show off how the combinators are not all that can be
-/// done with futures, but rather more custom (or optimized) implementations can
-/// be implemented with just a trait impl!
+/// and decrypto data andthen writing it to another.
 pub struct DecryptReadCopy {
     cipher: Rc<RefCell<Cipher>>,
     // The two I/O objects we'll be reading.
@@ -49,8 +43,7 @@ pub fn decrypt_copy(
     }
 }
 
-// Here we implement the `Future` trait for `Transfer` directly. This does not
-// use any combinators, and shows how you might implement it in custom
+// Here we implement the `Future` trait for `DecryptReadCopy` directly.
 // situations if needed.
 impl Future for DecryptReadCopy {
     type Item = u64;
@@ -111,7 +104,8 @@ impl Future for DecryptReadCopy {
     }
 }
 
-
+/// A future representing reading all data from one side of a proxy connection
+/// and crypto data andthen writing it to another.
 pub struct EncryptWriteCopy {
     cipher: Rc<RefCell<Cipher>>,
     // The two I/O objects we'll be reading.
@@ -142,9 +136,7 @@ pub fn encrypt_copy(
     }
 }
 
-// Here we implement the `Future` trait for `Transfer` directly. This does not
-// use any combinators, and shows how you might implement it in custom
-// situations if needed.
+// Here we implement the `Future` trait for `EncryptWriteCopy` directly.
 impl Future for EncryptWriteCopy {
     type Item = u64;
     type Error = std_io::Error;
