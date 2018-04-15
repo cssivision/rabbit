@@ -4,7 +4,7 @@ extern crate futures;
 extern crate log;
 extern crate num_cpus;
 extern crate serde_json;
-extern crate shadowsocks_rs;
+extern crate shadowsocks_rs as shadowsocks;
 extern crate tokio_core;
 extern crate tokio_timer;
 extern crate trust_dns_resolver;
@@ -25,12 +25,12 @@ use futures::{future, Future, Stream};
 use trust_dns_resolver::ResolverFuture;
 use tokio_timer::Timer;
 
-use shadowsocks_rs::config::Config;
-use shadowsocks_rs::resolver::resolve;
-use shadowsocks_rs::cipher::Cipher;
-use shadowsocks_rs::args::parse_args;
-use shadowsocks_rs::util::other;
-use shadowsocks_rs::io::{decrypt_copy, encrypt_copy, read_exact};
+use shadowsocks::config::Config;
+use shadowsocks::resolver::resolve;
+use shadowsocks::cipher::Cipher;
+use shadowsocks::args::parse_args;
+use shadowsocks::util::other;
+use shadowsocks::io::{decrypt_copy, encrypt_copy, read_exact};
 
 const TYPE_IPV4: u8 = 1;
 const TYPE_IPV6: u8 = 4;
@@ -74,8 +74,8 @@ fn worker(rx: mpsc::UnboundedReceiver<net::TcpStream>, config: Arc<Config>) {
 
     let server = rx.for_each(move |socket| {
         let cipher = Rc::new(RefCell::new(cipher.reset()));
-        let addr = socket.peer_addr().expect("failed to get remote address");
-        debug!("remote address: {}", addr);
+        let addr = socket.peer_addr();
+        debug!("remote address: {:?}", addr);
         let socket = TcpStream::from_stream(socket, &handle)
             .expect("failed to associate TCP stream");
         let address_info =
