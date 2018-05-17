@@ -1,7 +1,6 @@
 use std::io;
 use std::mem;
 use std::net::IpAddr;
-use std::sync::Arc;
 
 use util::other;
 
@@ -19,25 +18,13 @@ lazy_static! {
         let pair = Arc::new((Mutex::new(None::<ResolverFuture>), Condvar::new()));
         let pair2 = pair.clone();
 
-
         // Spawn the runtime to a new thread...
         //
         // This thread will manage the actual resolution runtime
         thread::spawn(move || {
             // A runtime for this new thread
             let mut runtime = Runtime::new().expect("failed to launch Runtime");
-
-            // our platform independent future, result, see next blocks
-            let future;
-
-            // To make this independent, if targeting macOS, BSD, Linux, or Windows, we can use the system's configuration:
-            #[cfg(any(unix, windows))]
-            {
-                // use the system resolver configuration
-                future = ResolverFuture::from_system_conf().expect("Failed to create ResolverFuture");
-            }
-
-            // this will block the thread until the Resolver is constructed with the above configuration
+            let future = ResolverFuture::from_system_conf().expect("Failed to create ResolverFuture");
             let resolver = runtime.block_on(future).expect("Failed to create DNS resolver");
 
             let &(ref lock, ref cvar) = &*pair2;
