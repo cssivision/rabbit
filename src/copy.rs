@@ -1,23 +1,21 @@
 use std::io as std_io;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 
-use tokio_io::io;
 use futures::{Async, Future, Poll};
-use tokio_core::net::TcpStream;
+use tokio::net::TcpStream;
+use tokio_io::io;
 
-use util::other;
 use cipher::Cipher;
-
+use util::other;
 
 /// A future representing reading all data from one side of a proxy connection
 /// and decrypto data andthen writing it to another.
 pub struct DecryptReadCopy {
-    cipher: Rc<RefCell<Cipher>>,
+    cipher: Arc<Mutex<Cipher>>,
     // The two I/O objects we'll be reading.
-    reader: Rc<TcpStream>,
-    writer: Rc<TcpStream>,
+    reader: Arc<TcpStream>,
+    writer: Arc<TcpStream>,
     buf: Vec<u8>,
     // The number of bytes we've written so far.
     amt: u64,
@@ -27,9 +25,9 @@ pub struct DecryptReadCopy {
 }
 
 pub fn decrypt_copy(
-    reader: Rc<TcpStream>,
-    writer: Rc<TcpStream>,
-    cipher: Rc<RefCell<Cipher>>,
+    reader: Arc<TcpStream>,
+    writer: Arc<TcpStream>,
+    cipher: Arc<Mutex<Cipher>>,
 ) -> DecryptReadCopy {
     DecryptReadCopy {
         cipher: cipher,
@@ -52,7 +50,7 @@ impl Future for DecryptReadCopy {
     fn poll(&mut self) -> Poll<u64, std_io::Error> {
         let mut reader = &*self.reader;
         let mut writer = &*self.writer;
-        let mut cipher = self.cipher.borrow_mut();
+        let mut cipher = self.cipher.lock().unwrap();
 
         if cipher.dec.is_none() {
             if let Async::Ready(t) =
@@ -107,10 +105,10 @@ impl Future for DecryptReadCopy {
 /// A future representing reading all data from one side of a proxy connection
 /// and crypto data andthen writing it to another.
 pub struct EncryptWriteCopy {
-    cipher: Rc<RefCell<Cipher>>,
+    cipher: Arc<Mutex<Cipher>>,
     // The two I/O objects we'll be reading.
-    reader: Rc<TcpStream>,
-    writer: Rc<TcpStream>,
+    reader: Arc<TcpStream>,
+    writer: Arc<TcpStream>,
     buf: Vec<u8>,
     // The number of bytes we've written so far.
     amt: u64,
@@ -120,9 +118,9 @@ pub struct EncryptWriteCopy {
 }
 
 pub fn encrypt_copy(
-    reader: Rc<TcpStream>,
-    writer: Rc<TcpStream>,
-    cipher: Rc<RefCell<Cipher>>,
+    reader: Arc<TcpStream>,
+    writer: Arc<TcpStream>,
+    cipher: Arc<Mutex<Cipher>>,
 ) -> EncryptWriteCopy {
     EncryptWriteCopy {
         cipher: cipher,
@@ -144,7 +142,7 @@ impl Future for EncryptWriteCopy {
     fn poll(&mut self) -> Poll<u64, std_io::Error> {
         let mut reader = &*self.reader;
         let mut writer = &*self.writer;
-        let mut cipher = self.cipher.borrow_mut();
+        let mut cipher = self.cipher.lock().unwrap();
 
         if cipher.enc.is_none() {
             cipher.init_encrypt();

@@ -1,13 +1,12 @@
 use std::io as std_io;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::mem;
+use std::sync::{Arc, Mutex};
 
 use futures::{Future, Poll};
 use tokio_io::AsyncRead;
 
-use util::other;
 use cipher::Cipher;
+use util::other;
 
 pub struct DecryptReadExact<A, T> {
     state: State<A, T>,
@@ -15,7 +14,7 @@ pub struct DecryptReadExact<A, T> {
 
 enum State<A, T> {
     Reading {
-        cipher: Rc<RefCell<Cipher>>,
+        cipher: Arc<Mutex<Cipher>>,
         reader: A,
         buf: T,
         pos: usize,
@@ -23,9 +22,10 @@ enum State<A, T> {
     Empty,
 }
 
-pub fn read_exact<A, T>(cipher: Rc<RefCell<Cipher>>, reader: A, buf: T) -> DecryptReadExact<A, T>
-    where A: AsyncRead,
-          T: AsMut<[u8]>,
+pub fn read_exact<A, T>(cipher: Arc<Mutex<Cipher>>, reader: A, buf: T) -> DecryptReadExact<A, T>
+where
+    A: AsyncRead,
+    T: AsMut<[u8]>,
 {
     DecryptReadExact {
         state: State::Reading {
@@ -33,7 +33,7 @@ pub fn read_exact<A, T>(cipher: Rc<RefCell<Cipher>>, reader: A, buf: T) -> Decry
             buf: buf,
             pos: 0,
             cipher: cipher,
-        }
+        },
     }
 }
 
@@ -41,25 +41,31 @@ fn eof() -> std_io::Error {
     std_io::Error::new(std_io::ErrorKind::UnexpectedEof, "early eof")
 }
 
-impl<A, T> Future for DecryptReadExact<A, T> 
-    where A: AsyncRead,
-          T: AsMut<[u8]>,
+impl<A, T> Future for DecryptReadExact<A, T>
+where
+    A: AsyncRead,
+    T: AsMut<[u8]>,
 {
     type Item = (A, T);
     type Error = std_io::Error;
 
     fn poll(&mut self) -> Poll<(A, T), std_io::Error> {
         match self.state {
-            State::Reading { ref mut reader, ref mut buf, ref mut pos, ref cipher } => {
-                let mut cipher = cipher.borrow_mut();
+            State::Reading {
+                ref mut reader,
+                ref mut buf,
+                ref mut pos,
+                ref cipher,
+            } => {
+                let mut cipher = cipher.lock().unwrap();
                 let buf = buf.as_mut();
                 if cipher.dec.is_none() {
                     let mut iv = vec![0u8; cipher.iv_len];
                     while *pos < iv.len() {
-                    let n = try_nb!(reader.read(&mut iv[*pos..]));
+                        let n = try_nb!(reader.read(&mut iv[*pos..]));
                         *pos += n;
                         if n == 0 {
-                            return Err(eof())
+                            return Err(eof());
                         }
                     }
 
@@ -83,7 +89,7 @@ impl<A, T> Future for DecryptReadExact<A, T>
 
                 let copy_len = buf.len();
                 buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
-            },
+            }
             State::Empty => panic!("poll a ReadExact after it's done"),
         }
 
