@@ -9,13 +9,6 @@ use futures::{future, Future};
 use tokio::runtime::current_thread::Runtime;
 use trust_dns_resolver::ResolverFuture;
 
-// This is an example of registering a static global resolver into any system.
-//
-// We may want to create a GlobalResolver as part of the Resolver library
-//   in the mean time, this example has the necessary steps to do so.
-//
-// Thank you to @zonyitoo for the original example.
-
 lazy_static! {
     // First we need to setup the global Resolver
     static ref GLOBAL_DNS_RESOLVER: ResolverFuture = {
