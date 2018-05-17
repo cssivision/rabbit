@@ -13,6 +13,8 @@ extern crate serde_json;
 extern crate tokio_io;
 extern crate tokio_timer;
 extern crate trust_dns_resolver;
+#[macro_use]
+extern crate lazy_static;
 
 pub mod args;
 pub mod cipher;

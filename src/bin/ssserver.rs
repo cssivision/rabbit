@@ -23,9 +23,7 @@ use shadowsocks::util::other;
 
 use futures::{future, Future, Stream};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::runtime::current_thread::Runtime;
 use tokio_timer::Deadline;
-use trust_dns_resolver::ResolverFuture;
 
 const TYPE_IPV4: u8 = 1;
 const TYPE_IPV6: u8 = 4;
@@ -36,9 +34,6 @@ fn main() {
     let config = parse_args().expect("invalid config");
     println!("{}", serde_json::to_string_pretty(&config).unwrap());
     let listener = TcpListener::bind(&config.server_addr.parse().unwrap()).expect("failed to bind");
-    let mut io_loop = Runtime::new().unwrap();
-    let resolver = ResolverFuture::from_system_conf().expect("init resolver fail");
-    let resolver = Arc::new(io_loop.block_on(resolver).unwrap());
     let cipher = Cipher::new(&config.method, &config.password);
 
     let server = listener
@@ -51,10 +46,8 @@ fn main() {
                 (c, host, port)
             });
 
-            let resolver = resolver.clone();
-            let look_up = address_info.and_then(move |(c, host, port)| {
-                resolve(&host, resolver).map(move |addr| (c, addr, port))
-            });
+            let look_up = address_info
+                .and_then(move |(c, host, port)| resolve(&host).map(move |addr| (c, addr, port)));
 
             let pair = look_up.and_then(move |(c1, addr, port)| {
                 debug!("resolver addr to ip: {}", addr);
