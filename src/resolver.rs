@@ -51,17 +51,13 @@ lazy_static! {
     };
 }
 
-pub fn resolve(host: &str) -> Box<Future<Item = IpAddr, Error = io::Error> + Send> {
-    let res = GLOBAL_DNS_RESOLVER
-        .lookup_ip(host)
-        .then(move |res| match res {
-            Ok(r) => if let Some(addr) = r.iter().next() {
-                future::ok(addr)
-            } else {
-                future::err(other("no ip return"))
-            },
-            Err(_) => future::err(other("resolve fail")),
-        });
-
-    Box::new(res)
+pub fn resolve(host: &str) -> impl Future<Item = IpAddr, Error = io::Error> + Send {
+    GLOBAL_DNS_RESOLVER.lookup_ip(host).then(|res| match res {
+        Ok(r) => if let Some(addr) = r.iter().next() {
+            future::ok(addr)
+        } else {
+            future::err(other("no ip return"))
+        },
+        Err(_) => future::err(other("resolve fail")),
+    })
 }

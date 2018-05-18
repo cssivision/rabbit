@@ -19,15 +19,12 @@ use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{decrypt_copy, encrypt_copy, read_exact};
 use shadowsocks::resolver::resolve;
+use shadowsocks::socks5::v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN};
 use shadowsocks::util::other;
 
 use futures::{future, Future, Stream};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_timer::Deadline;
-
-const TYPE_IPV4: u8 = 1;
-const TYPE_IPV6: u8 = 4;
-const TYPE_DOMAIN: u8 = 3;
 
 fn main() {
     env_logger::init().unwrap();
@@ -81,10 +78,11 @@ fn main() {
 fn get_addr_info(
     cipher: Arc<Mutex<Cipher>>,
     conn: TcpStream,
-) -> Box<Future<Item = (TcpStream, String, u16), Error = io::Error> + Send> {
+) -> impl Future<Item = (TcpStream, String, u16), Error = io::Error> + Send {
     let cipher_copy = cipher.clone();
     let address_type = read_exact(cipher_copy.clone(), conn, vec![0u8; 1]);
-    let address = address_type.and_then(move |(c, buf)| {
+
+    address_type.and_then(move |(c, buf)| {
         match buf[0] {
             // For IPv4 addresses, we read the 4 bytes for the address as
             // well as 2 bytes for the port.
@@ -137,8 +135,7 @@ fn get_addr_info(
                 mybox(future::err(other("unknown address type, received")))
             }
         }
-    });
-    mybox(address)
+    })
 }
 
 fn mybox<F: Future + 'static + Send>(f: F) -> Box<Future<Item = F::Item, Error = F::Error> + Send> {

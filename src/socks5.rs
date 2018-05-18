@@ -25,7 +25,7 @@ pub mod v5 {
 /// return `io::Error`.
 pub fn serve(
     conn: TcpStream,
-) -> Box<Future<Item = (TcpStream, String, u16), Error = io::Error> + Send> {
+) -> impl Future<Item = (TcpStream, String, u16), Error = io::Error> + Send {
     // socks version, only support version 5.
     let version = read_exact(conn, [0u8; 2]).and_then(|(conn, buf)| {
         if buf[0] == v5::VERSION {
@@ -65,7 +65,7 @@ pub fn serve(
     // there's one byte which is reserved for future use, so we read it and discard it.
     let resv = command.and_then(|c| read_exact(c, [0u8]));
     let adress_type = resv.and_then(|(conn, _)| read_exact(conn, [0u8]));
-    let address = mybox(adress_type.and_then(move |(c, buf)| {
+    let address = adress_type.and_then(move |(c, buf)| {
         match buf[0] {
             // For IPv4 addresses, we read the 4 bytes for the address as
             // well as 2 bytes for the port.
@@ -114,20 +114,20 @@ pub fn serve(
                 mybox(future::err(other(&msg)))
             }
         }
-    }));
+    });
 
     // Sending connection established message immediately to client.
     // This some round trip time for creating socks connection with the client.
     // But if connection failed, the client will get connection reset error.
-    let handshake_finish = mybox(address.and_then(move |(conn, addr, port)| {
+    let handshake_finish = address.and_then(move |(conn, addr, port)| {
         let resp = [0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43];
         write_all(conn, resp).map(move |(conn, _)| (conn, addr, port))
-    }));
+    });
 
     let timeout = Deadline::new(handshake_finish, Instant::now().add(Duration::new(10, 0)))
         .map_err(|_| other("handshake timeout"));
 
-    mybox(timeout.map(|(conn, addr, port)| (conn, addr, port)))
+    timeout
 }
 
 fn mybox<F: Future + 'static + Send>(f: F) -> Box<Future<Item = F::Item, Error = F::Error> + Send> {
