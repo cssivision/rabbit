@@ -1,9 +1,9 @@
-use std::io;
 use md5::compute;
+use std::io;
 
 static MD5_LENGTH: u32 = 16;
 
-pub fn other(desc: &'static str) -> io::Error {
+pub fn other(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 

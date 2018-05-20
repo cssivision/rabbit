@@ -10,6 +10,8 @@ use tokio::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
 use tokio_timer::Deadline;
 
+use util::other;
+
 pub mod v5 {
     pub const VERSION: u8 = 5;
     pub const METH_NO_AUTH: u8 = 0;
@@ -132,8 +134,4 @@ pub fn serve(
 
 fn mybox<F: Future + 'static + Send>(f: F) -> Box<Future<Item = F::Item, Error = F::Error> + Send> {
     Box::new(f)
-}
-
-fn other(desc: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, desc)
 }
