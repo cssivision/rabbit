@@ -60,9 +60,9 @@ fn main() {
                 half1.join(half2)
             });
 
-            let finish = pipe.map(|data| {
-                debug!("received {} bytes, responsed {} bytes", data.0, data.1)
-            }).map_err(|e| println!("error: {}", e));
+            let finish = pipe
+                .map(|data| debug!("received {} bytes, responsed {} bytes", data.0, data.1))
+                .map_err(|e| println!("error: {}", e));
 
             let timeout =
                 Deadline::new(finish, Instant::now().add(Duration::new(config.timeout, 0)))
@@ -79,8 +79,7 @@ fn get_addr_info(
     cipher: Arc<Mutex<Cipher>>,
     conn: TcpStream,
 ) -> impl Future<Item = (TcpStream, String, u16), Error = io::Error> + Send {
-    let cipher_copy = cipher.clone();
-    let address_type = read_exact(cipher_copy.clone(), conn, vec![0u8; 1]);
+    let address_type = read_exact(cipher.clone(), conn, vec![0u8; 1]);
 
     address_type.and_then(move |(c, buf)| {
         match buf[0] {

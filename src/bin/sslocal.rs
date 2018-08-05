@@ -16,7 +16,8 @@ use shadowsocks::cipher::Cipher;
 use shadowsocks::config::Config;
 use shadowsocks::io::{decrypt_copy, encrypt_copy, write_all};
 use shadowsocks::socks5::{
-    self, v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN},
+    self,
+    v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN},
 };
 use tokio::net::{TcpListener, TcpStream};
 
@@ -58,9 +59,9 @@ fn run(config: Config) {
                 half1.join(half2)
             });
 
-            let finish = pipe.map(|data| {
-                debug!("received {} bytes, responsed {} bytes", data.0, data.1)
-            }).map_err(|e| println!("error: {}", e));
+            let finish = pipe
+                .map(|data| debug!("received {} bytes, responsed {} bytes", data.0, data.1))
+                .map_err(|e| eprintln!("error: {}", e));
 
             tokio::spawn(finish);
             Ok(())
