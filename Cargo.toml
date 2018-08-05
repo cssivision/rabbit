@@ -17,7 +17,7 @@ tokio-io = "0.1"
 log = "0.3"
 env_logger = "0.3"
 getopts = "0.2"
-openssl = { git = "https://github.com/sfackler/rust-openssl", features = ["vendored"] }
+openssl = { version = "0.10", features = ["vendored"] }
 rand = "0.3"
 md5 = "0.3"
 tokio = "0.1"
