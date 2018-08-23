@@ -6,6 +6,7 @@ extern crate serde_json;
 extern crate shadowsocks_rs as shadowsocks;
 extern crate tokio;
 
+use std::net::Shutdown;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -54,8 +55,17 @@ fn run(config: Config) {
                 let c1 = Arc::new(c1);
                 let c2 = Arc::new(c2);
 
-                let half1 = encrypt_copy(c1.clone(), c2.clone(), cipher.clone());
-                let half2 = decrypt_copy(c2, c1, cipher.clone());
+                let half1 =
+                    encrypt_copy(c1.clone(), c2.clone(), cipher.clone()).and_then(|(n, c1, c2)| {
+                        c2.shutdown(Shutdown::Read)
+                            .and(c1.shutdown(Shutdown::Write))
+                            .map(|_| n)
+                    });
+                let half2 = decrypt_copy(c2, c1, cipher.clone()).and_then(|(n, c2, c1)| {
+                    c1.shutdown(Shutdown::Read)
+                        .and(c2.shutdown(Shutdown::Write))
+                        .map(|_| n)
+                });
                 half1.join(half2)
             });
 

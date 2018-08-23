@@ -9,7 +9,7 @@ extern crate tokio_timer;
 extern crate trust_dns_resolver;
 
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 use std::ops::Add;
 use std::str;
 use std::sync::{Arc, Mutex};
@@ -55,8 +55,17 @@ fn main() {
                 let c1 = Arc::new(c1);
                 let c2 = Arc::new(c2);
 
-                let half1 = encrypt_copy(c2.clone(), c1.clone(), cipher.clone());
-                let half2 = decrypt_copy(c1, c2, cipher.clone());
+                let half1 =
+                    encrypt_copy(c2.clone(), c1.clone(), cipher.clone()).and_then(|(n, c2, c1)| {
+                        c2.shutdown(Shutdown::Read)
+                            .and(c1.shutdown(Shutdown::Write))
+                            .map(|_| n)
+                    });
+                let half2 = decrypt_copy(c1, c2, cipher.clone()).and_then(|(n, c1, c2)| {
+                    c1.shutdown(Shutdown::Read)
+                        .and(c2.shutdown(Shutdown::Write))
+                        .map(|_| n)
+                });
                 half1.join(half2)
             });
 
@@ -115,8 +124,7 @@ fn get_addr_info(
                 read_exact(cipher.clone(), c, vec![0u8])
                     .and_then(move |(conn, buf)| {
                         read_exact(cipher.clone(), conn, vec![0u8; buf[0] as usize + 2])
-                    })
-                    .and_then(|(conn, buf)| {
+                    }).and_then(|(conn, buf)| {
                         let hostname = &buf[..buf.len() - 2];
                         let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                             hostname
