@@ -9,11 +9,9 @@ extern crate tokio_timer;
 extern crate trust_dns_resolver;
 
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::ops::Add;
+use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 use std::str;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
@@ -24,7 +22,6 @@ use shadowsocks::util::other;
 
 use futures::{future, Future, Stream};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_timer::Deadline;
 
 fn main() {
     env_logger::init().unwrap();
@@ -60,15 +57,17 @@ fn main() {
                 half1.join(half2)
             });
 
-            let finish = pipe
+            let close = pipe.and_then(move |((n1, c1, c2), (n2, _, _))| {
+                c1.shutdown(Shutdown::Both)
+                    .and(c2.shutdown(Shutdown::Both))
+                    .map(|_| (n1, n2))
+            });
+
+            let finish = close
                 .map(|data| debug!("received {} bytes, responsed {} bytes", data.0, data.1))
                 .map_err(|e| println!("error: {}", e));
 
-            let timeout =
-                Deadline::new(finish, Instant::now().add(Duration::new(config.timeout, 0)))
-                    .map_err(|e| eprintln!("timeout err: {:?}", e));
-
-            tokio::spawn(timeout);
+            tokio::spawn(finish);
             Ok(())
         });
 
@@ -115,8 +114,7 @@ fn get_addr_info(
                 read_exact(cipher.clone(), c, vec![0u8])
                     .and_then(move |(conn, buf)| {
                         read_exact(cipher.clone(), conn, vec![0u8; buf[0] as usize + 2])
-                    })
-                    .and_then(|(conn, buf)| {
+                    }).and_then(|(conn, buf)| {
                         let hostname = &buf[..buf.len() - 2];
                         let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                             hostname

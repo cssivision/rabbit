@@ -44,10 +44,10 @@ pub fn decrypt_copy(
 // Here we implement the `Future` trait for `DecryptReadCopy` directly.
 // situations if needed.
 impl Future for DecryptReadCopy {
-    type Item = u64;
+    type Item = (u64, Arc<TcpStream>, Arc<TcpStream>);
     type Error = std_io::Error;
 
-    fn poll(&mut self) -> Poll<u64, std_io::Error> {
+    fn poll(&mut self) -> Poll<(u64, Arc<TcpStream>, Arc<TcpStream>), std_io::Error> {
         let mut reader = &*self.reader;
         let mut writer = &*self.writer;
         let mut cipher = self.cipher.lock().unwrap();
@@ -96,7 +96,7 @@ impl Future for DecryptReadCopy {
 
             if self.pos == self.cap && self.read_done {
                 try_nb!(writer.flush());
-                return Ok(self.amt.into());
+                return Ok((self.amt, self.reader.clone(), self.writer.clone()).into());
             }
         }
     }
@@ -136,10 +136,10 @@ pub fn encrypt_copy(
 
 // Here we implement the `Future` trait for `EncryptWriteCopy` directly.
 impl Future for EncryptWriteCopy {
-    type Item = u64;
+    type Item = (u64, Arc<TcpStream>, Arc<TcpStream>);
     type Error = std_io::Error;
 
-    fn poll(&mut self) -> Poll<u64, std_io::Error> {
+    fn poll(&mut self) -> Poll<(u64, Arc<TcpStream>, Arc<TcpStream>), std_io::Error> {
         let mut reader = &*self.reader;
         let mut writer = &*self.writer;
         let mut cipher = self.cipher.lock().unwrap();
@@ -188,7 +188,7 @@ impl Future for EncryptWriteCopy {
 
             if self.pos == self.cap && self.read_done {
                 try_nb!(writer.flush());
-                return Ok(self.amt.into());
+                return Ok((self.amt, self.reader.clone(), self.writer.clone()).into());
             }
         }
     }

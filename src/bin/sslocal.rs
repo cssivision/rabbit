@@ -6,6 +6,7 @@ extern crate serde_json;
 extern crate shadowsocks_rs as shadowsocks;
 extern crate tokio;
 
+use std::net::Shutdown;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -59,7 +60,13 @@ fn run(config: Config) {
                 half1.join(half2)
             });
 
-            let finish = pipe
+            let close = pipe.and_then(move |((n1, c1, c2), (n2, _, _))| {
+                c1.shutdown(Shutdown::Both)
+                    .and(c2.shutdown(Shutdown::Both))
+                    .map(|_| (n1, n2))
+            });
+
+            let finish = close
                 .map(|data| debug!("received {} bytes, responsed {} bytes", data.0, data.1))
                 .map_err(|e| eprintln!("error: {}", e));
 
