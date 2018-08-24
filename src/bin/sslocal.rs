@@ -55,21 +55,21 @@ fn run(config: Config) {
                 let c1 = Arc::new(c1);
                 let c2 = Arc::new(c2);
 
-                let half1 =
-                    encrypt_copy(c1.clone(), c2.clone(), cipher.clone()).and_then(|(n, c1, c2)| {
-                        c2.shutdown(Shutdown::Read)
-                            .and(c1.shutdown(Shutdown::Write))
-                            .map(|_| n)
-                    });
-                let half2 = decrypt_copy(c2, c1, cipher.clone()).and_then(|(n, c2, c1)| {
-                    c1.shutdown(Shutdown::Read)
-                        .and(c2.shutdown(Shutdown::Write))
-                        .map(|_| n)
-                });
+                let half1 = encrypt_copy(c1.clone(), c2.clone(), cipher.clone());
+                let half2 = decrypt_copy(c2, c1, cipher.clone());
                 half1.join(half2)
             });
 
-            let finish = pipe
+            let close = pipe.and_then(move |((n1, c1, c2), (n2, _, _))| {
+                c1.shutdown(Shutdown::Both)
+                    .and(c2.shutdown(Shutdown::Both))
+                    .map(|_| {
+                        println!("proxy finish, shutdown connection");
+                        (n1, n2)
+                    })
+            });
+
+            let finish = close
                 .map(|data| debug!("received {} bytes, responsed {} bytes", data.0, data.1))
                 .map_err(|e| eprintln!("error: {}", e));
 
