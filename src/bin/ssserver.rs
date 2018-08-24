@@ -61,18 +61,21 @@ fn main() {
             });
 
             let close = pipe.and_then(move |((n1, c1, c2), (n2, _, _))| {
-                c1.shutdown(Shutdown::Both).and(c2.shutdown(Shutdown::Both)).map(|_| (n1, n2))
+                c1.shutdown(Shutdown::Both).and(c2.shutdown(Shutdown::Both)).map(|_| {
+                    println!("proxy finish, shutdown connection");
+                    (n1, n2)
+                })
             });
 
             let finish = close
                 .map(|data| debug!("received {} bytes, responsed {} bytes", data.0, data.1))
                 .map_err(|e| println!("error: {}", e));
 
-            let timeout =
-                Deadline::new(finish, Instant::now().add(Duration::new(config.timeout, 0)))
-                    .map_err(|e| eprintln!("timeout err: {:?}", e));
+            // let timeout =
+            //     Deadline::new(finish, Instant::now().add(Duration::new(config.timeout, 0)))
+            //         .map_err(|e| eprintln!("timeout err: {:?}", e));
 
-            tokio::spawn(timeout);
+            tokio::spawn(finish);
             Ok(())
         });
 
