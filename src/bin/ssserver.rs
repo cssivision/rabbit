@@ -24,7 +24,7 @@ use futures::{future, Future, Stream};
 use tokio::net::{TcpListener, TcpStream};
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
     let config = parse_args().expect("invalid config");
     println!("{}", serde_json::to_string_pretty(&config).unwrap());
     let listener = TcpListener::bind(&config.server_addr.parse().unwrap()).expect("failed to bind");

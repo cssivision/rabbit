@@ -1,14 +1,13 @@
 //! A simple socks5 proxy library.
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::ops::Add;
 use std::str;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::{future, Future};
 use tokio::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
-use tokio_timer::Deadline;
+use tokio_timer::Timeout;
 
 use util::other;
 
@@ -126,7 +125,7 @@ pub fn serve(
         write_all(conn, resp).map(move |(conn, _)| (conn, addr, port))
     });
 
-    let timeout = Deadline::new(handshake_finish, Instant::now().add(Duration::new(10, 0)))
+    let timeout = Timeout::new(handshake_finish, Duration::new(10, 0))
         .map_err(|_| other("handshake timeout"));
 
     timeout

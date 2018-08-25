@@ -1,6 +1,7 @@
 use openssl::symm;
-use util::generate_key;
+use rand::distributions::Standard;
 use rand::{thread_rng, Rng};
+use util::generate_key;
 
 pub struct Cipher {
     pub cipher: symm::Cipher,
@@ -32,7 +33,7 @@ impl Cipher {
     pub fn init_encrypt(&mut self) {
         if self.iv.is_empty() {
             let mut rng = thread_rng();
-            self.iv = rng.gen_iter::<u8>().take(self.iv_len).collect::<Vec<u8>>();
+            self.iv = rng.sample_iter(&Standard).take(self.iv_len).collect();
         }
         self.enc = Some(
             symm::Crypter::new(

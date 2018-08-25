@@ -23,7 +23,7 @@ use shadowsocks::socks5::{
 use tokio::net::{TcpListener, TcpStream};
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
     if let Some(config) = parse_args() {
         println!("{}", serde_json::to_string_pretty(&config).unwrap());
         run(config);
