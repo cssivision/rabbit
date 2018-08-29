@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
-use shadowsocks::config::Config;
 use shadowsocks::io::{decrypt_copy, encrypt_copy, write_all};
 use shadowsocks::socks5::{
     self,
@@ -27,13 +26,9 @@ use tokio_timer::Timeout;
 
 fn main() {
     env_logger::init();
-    if let Some(config) = parse_args() {
-        println!("{}", serde_json::to_string_pretty(&config).unwrap());
-        run(config);
-    }
-}
+    let config = parse_args().unwrap();
+    println!("{}", serde_json::to_string_pretty(&config).unwrap());
 
-fn run(config: Config) {
     let local_addr = config.local_addr.parse().expect("invalid local addr");
     let listener = TcpListener::bind(&local_addr).unwrap();
     let cipher = Cipher::new(&config.method, &config.password);
