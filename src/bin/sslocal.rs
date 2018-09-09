@@ -10,7 +10,6 @@ extern crate tokio_timer;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
@@ -22,7 +21,6 @@ use shadowsocks::socks5::{
 
 use futures::{Future, Stream};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_timer::Timeout;
 
 fn main() {
     env_logger::init();
@@ -59,13 +57,15 @@ fn main() {
             });
 
             let finish = pipe
-                .map(|data| debug!("received {} bytes, responsed {} bytes", (data.0).0, (data.1).0))
-                .map_err(|e| println!("error: {}", e));
+                .map(|data| {
+                    debug!(
+                        "received {} bytes, responsed {} bytes",
+                        (data.0).0,
+                        (data.1).0
+                    )
+                }).map_err(|e| println!("error: {}", e));
 
-            let timeout = Timeout::new(finish, Duration::new(config.timeout, 0))
-                    .map_err(|e| eprintln!("timeout err: {:?}", e));
-
-            tokio::spawn(timeout);
+            tokio::spawn(finish);
             Ok(())
         });
 
