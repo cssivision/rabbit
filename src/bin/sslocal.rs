@@ -5,7 +5,6 @@ extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs as shadowsocks;
 extern crate tokio;
-extern crate tokio_timer;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
