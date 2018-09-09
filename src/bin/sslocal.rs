@@ -5,7 +5,6 @@ extern crate log;
 extern crate serde_json;
 extern crate shadowsocks_rs as shadowsocks;
 extern crate tokio;
-extern crate tokio_timer;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
@@ -22,7 +21,6 @@ use shadowsocks::socks5::{
 
 use futures::{Future, Stream};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_timer::Timeout;
 
 fn main() {
     env_logger::init();
@@ -49,7 +47,10 @@ fn main() {
                     .and_then(|c2| write_all(cipher_copy, c2, rawaddr).map(|(c2, _)| (c1, c2)))
             });
 
+            let keepalive_period = config.keepalive_period;
             let pipe = pair.and_then(move |(c1, c2)| {
+                let _ = c1.set_keepalive(Some(Duration::new(keepalive_period, 0)));
+                let _ = c2.set_keepalive(Some(Duration::new(keepalive_period, 0)));
                 let c1 = Arc::new(c1);
                 let c2 = Arc::new(c2);
 
@@ -59,13 +60,15 @@ fn main() {
             });
 
             let finish = pipe
-                .map(|data| debug!("received {} bytes, responsed {} bytes", (data.0).0, (data.1).0))
-                .map_err(|e| println!("error: {}", e));
+                .map(|data| {
+                    debug!(
+                        "received {} bytes, responsed {} bytes",
+                        (data.0).0,
+                        (data.1).0
+                    )
+                }).map_err(|e| println!("error: {}", e));
 
-            let timeout = Timeout::new(finish, Duration::new(config.timeout, 0))
-                    .map_err(|e| eprintln!("timeout err: {:?}", e));
-
-            tokio::spawn(timeout);
+            tokio::spawn(finish);
             Ok(())
         });
 
