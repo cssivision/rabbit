@@ -9,6 +9,7 @@ extern crate tokio;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
@@ -47,6 +48,8 @@ fn main() {
             });
 
             let pipe = pair.and_then(move |(c1, c2)| {
+                let _ = c1.set_keepalive(Some(Duration::new(600, 0)));
+                let _ = c2.set_keepalive(Some(Duration::new(600, 0)));
                 let c1 = Arc::new(c1);
                 let c2 = Arc::new(c2);
 
