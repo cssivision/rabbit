@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::env;
 use std::fs::File;
 use std::io::{self, Read};
-use std::env;
+use std::path::Path;
 
 use serde_json;
 
@@ -10,6 +10,7 @@ static SERVER_ADDR: &str = "0.0.0.0:9006";
 static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
 static TIMEOUT: u64 = 100;
+static KEEPALIVE_PEARID: u64 = 100;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Config {
@@ -18,6 +19,7 @@ pub struct Config {
     pub password: String,
     pub method: String,
     pub timeout: u64,
+    pub keepalive_period: u64,
 }
 
 impl Config {
@@ -75,6 +77,17 @@ impl Config {
             } else {
                 TIMEOUT
             }
+        }
+
+        if config.keepalive_period == 0 {
+            config.keepalive_period =
+                if let Ok(keepalive_period) = env::var("SHADOWSOCKS_KEEPALIVE_PERIOD") {
+                    keepalive_period
+                        .parse()
+                        .expect("invalid keepalive_period value")
+                } else {
+                    KEEPALIVE_PEARID
+                }
         }
 
         Ok(config)
