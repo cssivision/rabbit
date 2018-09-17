@@ -10,7 +10,7 @@ static SERVER_ADDR: &str = "0.0.0.0:9006";
 static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
 static TIMEOUT: u64 = 100;
-static KEEPALIVE_PEARID: u64 = 100;
+static KEEPALIVE_PEARID: u64 = 600;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Config {
