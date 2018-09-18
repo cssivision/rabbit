@@ -4,7 +4,7 @@ use std::process;
 use config::Config;
 use getopts::Options;
 
-pub fn parse_args() -> Option<Config> {
+pub fn parse_args(name: &str) -> Option<Config> {
     let args: Vec<String> = env::args().collect();
 
     let mut opts = Options::new();
@@ -14,13 +14,13 @@ pub fn parse_args() -> Option<Config> {
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(_) => {
-            print!("{}", opts.usage("Usage: sslocal -c PATH"));
+            print!("{}", opts.usage(&format!("Usage: {} -c PATH", name)));
             return None;
         }
     };
 
     if matches.opt_present("h") {
-        print!("{}", opts.usage("Usage: sslocal -c PATH"));
+        print!("{}", opts.usage(&format!("Usage: {} -c PATH", name)));
         process::exit(0);
     }
 

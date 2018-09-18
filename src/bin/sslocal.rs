@@ -24,7 +24,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 fn main() {
     env_logger::init();
-    let config = parse_args().unwrap();
+    let config = parse_args("sslocal").unwrap();
     println!("{}", serde_json::to_string_pretty(&config).unwrap());
 
     let local_addr = config.local_addr.parse().expect("invalid local addr");

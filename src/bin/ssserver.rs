@@ -25,7 +25,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 fn main() {
     env_logger::init();
-    let config = parse_args().expect("invalid config");
+    let config = parse_args("ssserver").expect("invalid config");
     println!("{}", serde_json::to_string_pretty(&config).unwrap());
     let listener = TcpListener::bind(&config.server_addr.parse().unwrap()).expect("failed to bind");
     let cipher = Cipher::new(&config.method, &config.password);
