@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use futures::{Async, Future, Poll};
 use tokio::net::TcpStream;
-use tokio_io::io;
+use tokio_io::{io, try_nb};
 
-use cipher::Cipher;
-use util::other;
+use crate::cipher::Cipher;
+use crate::util::other;
 
 /// A future representing reading all data from one side of a proxy connection
 /// and decrypto data andthen writing it to another.

@@ -1,20 +1,14 @@
-extern crate env_logger;
-extern crate futures;
-#[macro_use]
-extern crate log;
-extern crate serde_json;
-extern crate shadowsocks_rs as shadowsocks;
-extern crate tokio;
-
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use shadowsocks::args::parse_args;
-use shadowsocks::cipher::Cipher;
-use shadowsocks::io::{decrypt_copy, encrypt_copy, write_all};
-use shadowsocks::socks5::{
+use log::debug;
+
+use shadowsocks_rs::args::parse_args;
+use shadowsocks_rs::cipher::Cipher;
+use shadowsocks_rs::io::{decrypt_copy, encrypt_copy, write_all};
+use shadowsocks_rs::socks5::{
     self,
     v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN},
 };

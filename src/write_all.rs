@@ -3,10 +3,11 @@ use std::mem;
 use std::sync::{Arc, Mutex};
 
 use futures::{Future, Poll};
-use tokio_io::AsyncWrite;
+use tokio_io::{AsyncWrite, try_nb};
+use log::error;
 
-use cipher::Cipher;
-use util::other;
+use crate::cipher::Cipher;
+use crate::util::other;
 
 pub struct EncryptWriteAll<A, T> {
     state: State<A, T>,
