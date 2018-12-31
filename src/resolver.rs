@@ -6,16 +6,16 @@ use util::other;
 
 use futures::{future, Future};
 use tokio::runtime::current_thread::Runtime;
-use trust_dns_resolver::ResolverFuture;
+use trust_dns_resolver::AsyncResolver;
 
 lazy_static! {
     // First we need to setup the global Resolver
-    static ref GLOBAL_DNS_RESOLVER: ResolverFuture = {
+    static ref GLOBAL_DNS_RESOLVER: AsyncResolver = {
         use std::sync::{Arc, Mutex, Condvar};
         use std::thread;
 
         // We'll be using this condvar to get the Resolver from the thread...
-        let pair = Arc::new((Mutex::new(None::<ResolverFuture>), Condvar::new()));
+        let pair = Arc::new((Mutex::new(None::<AsyncResolver>), Condvar::new()));
         let pair2 = pair.clone();
 
         // Spawn the runtime to a new thread...
@@ -24,8 +24,7 @@ lazy_static! {
         thread::spawn(move || {
             // A runtime for this new thread
             let mut runtime = Runtime::new().expect("failed to launch Runtime");
-            let future = ResolverFuture::from_system_conf().expect("Failed to create ResolverFuture");
-            let resolver = runtime.block_on(future).expect("Failed to create DNS resolver");
+            let (resolver, bg) = AsyncResolver::from_system_conf().expect("Failed to create ResolverFuture");
 
             let &(ref lock, ref cvar) = &*pair2;
             let mut started = lock.lock().unwrap();
@@ -33,7 +32,7 @@ lazy_static! {
             cvar.notify_one();
             drop(started);
 
-            runtime.run().expect("Resolver Thread shutdown!");
+            runtime.block_on(bg).expect("Fail to create DNS resolver");
         });
 
         // Wait for the thread to start up.
