@@ -1,7 +1,7 @@
 use std::env;
 use std::process;
 
-use config::Config;
+use crate::config::Config;
 use getopts::Options;
 
 pub fn parse_args(name: &str) -> Option<Config> {

@@ -4,6 +4,7 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use serde_json;
+use serde_derive::{Deserialize, Serialize};
 
 static LOCAL_ADDR: &str = "0.0.0.0:6009";
 static SERVER_ADDR: &str = "0.0.0.0:9006";

@@ -2,7 +2,9 @@ use std::io;
 use std::mem;
 use std::net::IpAddr;
 
-use util::other;
+use lazy_static::lazy_static;
+
+use crate::util::other;
 
 use futures::{future, Future};
 use tokio::runtime::current_thread::Runtime;
