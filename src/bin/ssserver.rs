@@ -5,12 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use log::{debug, error};
-use shadowsocks_rs::args::parse_args;
-use shadowsocks_rs::cipher::Cipher;
-use shadowsocks_rs::io::{decrypt_copy, encrypt_copy, read_exact};
-use shadowsocks_rs::resolver::resolve;
-use shadowsocks_rs::socks5::v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN};
-use shadowsocks_rs::util::other;
+
+use shadowsocks_rs as shadowsocks;
+use self::shadowsocks::args::parse_args;
+use self::shadowsocks::cipher::Cipher;
+use self::shadowsocks::io::{decrypt_copy, encrypt_copy, read_exact};
+use self::shadowsocks::resolver::resolve;
+use self::shadowsocks::socks5::v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN};
+use self::shadowsocks::util::other;
 
 use futures::{future, Future, Stream};
 use tokio::net::{TcpListener, TcpStream};

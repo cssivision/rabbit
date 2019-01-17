@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use log::debug;
 
-use shadowsocks_rs::args::parse_args;
-use shadowsocks_rs::cipher::Cipher;
-use shadowsocks_rs::io::{decrypt_copy, encrypt_copy, write_all};
-use shadowsocks_rs::socks5::{
+use shadowsocks_rs as shadowsocks;
+use self::shadowsocks::args::parse_args;
+use self::shadowsocks::cipher::Cipher;
+use self::shadowsocks::io::{decrypt_copy, encrypt_copy, write_all};
+use self::shadowsocks::socks5::{
     self,
     v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN},
 };
