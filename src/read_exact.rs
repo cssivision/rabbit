@@ -3,10 +3,10 @@ use std::mem;
 use std::sync::{Arc, Mutex};
 
 use futures::{Future, Poll};
-use tokio_io::AsyncRead;
+use tokio_io::{AsyncRead, try_nb};
 
-use cipher::Cipher;
-use util::other;
+use crate::cipher::Cipher;
+use crate::util::other;
 
 pub struct DecryptReadExact<A, T> {
     state: State<A, T>,

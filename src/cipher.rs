@@ -1,7 +1,7 @@
 use openssl::symm;
 use rand::distributions::Standard;
 use rand::{thread_rng, Rng};
-use util::generate_key;
+use crate::util::generate_key;
 
 pub struct Cipher {
     pub cipher: symm::Cipher,

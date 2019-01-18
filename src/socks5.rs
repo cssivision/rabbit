@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
 use tokio_timer::Timeout;
 
-use util::other;
+use crate::util::other;
 
 pub mod v5 {
     pub const VERSION: u8 = 5;
