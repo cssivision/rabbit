@@ -1,7 +1,8 @@
 use openssl::symm;
+use crate::util::generate_key;
 use rand::distributions::Standard;
 use rand::{thread_rng, Rng};
-use crate::util::generate_key;
+
 
 pub struct Cipher {
     pub cipher: symm::Cipher,
@@ -16,6 +17,9 @@ impl Cipher {
     pub fn new(method: &str, password: &str) -> Cipher {
         let cipher = match method {
             "aes-256-cfb" => symm::Cipher::aes_256_cfb128(),
+            "aes-128-cfb1" => symm::Cipher::aes_128_cfb128(),
+            "aes-128-cfb2" => symm::Cipher::aes_128_cfb1(),
+            "aes-128-cfb3" => symm::Cipher::aes_128_cfb8(),
             _ => panic!("method not supported"),
         };
 
@@ -41,7 +45,8 @@ impl Cipher {
                 symm::Mode::Encrypt,
                 &self.key,
                 Some(&self.iv),
-            ).expect("init enc error"),
+            )
+            .expect("init enc error"),
         );
     }
 
@@ -52,7 +57,8 @@ impl Cipher {
                 symm::Mode::Decrypt,
                 &self.key,
                 Some(iv),
-            ).expect("init enc error"),
+            )
+            .expect("init enc error"),
         );
     }
 
