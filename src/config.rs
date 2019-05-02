@@ -3,8 +3,9 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-use serde_json;
+use log::error;
 use serde_derive::{Deserialize, Serialize};
+use serde_json;
 
 static LOCAL_ADDR: &str = "0.0.0.0:6009";
 static SERVER_ADDR: &str = "0.0.0.0:9006";
@@ -14,6 +15,7 @@ static TIMEOUT: u64 = 100;
 static KEEPALIVE_PEARID: u64 = 600;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[serde(default)]
 pub struct Config {
     pub local_addr: String,
     pub server_addr: String,
@@ -35,6 +37,7 @@ impl Config {
             config = match serde_json::from_str(&contents) {
                 Ok(c) => c,
                 Err(e) => {
+                    error!("{}", e);
                     return Err(io::Error::new(io::ErrorKind::Other, e));
                 }
             };
