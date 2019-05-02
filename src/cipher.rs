@@ -16,6 +16,7 @@ impl Cipher {
     pub fn new(method: &str, password: &str) -> Cipher {
         let cipher = match method {
             "aes-256-cfb" => symm::Cipher::aes_256_cfb128(),
+            "aes-128-cfb" => symm::Cipher::aes_128_cfb128(),
             _ => panic!("method not supported"),
         };
 
