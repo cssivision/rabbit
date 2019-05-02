@@ -20,6 +20,7 @@ impl Cipher {
             "aes-128-cfb" => symm::Cipher::aes_128_cfb128(),
             "aes-128-cfb1" => symm::Cipher::aes_128_cfb1(),
             "aes-128-cfb8" => symm::Cipher::aes_128_cfb8(),
+            "rc4-md5" => symm::Cipher::rc4(),
             _ => panic!("method not supported"),
         };
 
