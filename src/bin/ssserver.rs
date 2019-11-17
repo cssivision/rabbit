@@ -131,6 +131,6 @@ fn get_addr_info(
     })
 }
 
-fn mybox<F: Future + 'static + Send>(f: F) -> Box<Future<Item = F::Item, Error = F::Error> + Send> {
+fn mybox<F: Future + 'static + Send>(f: F) -> Box<dyn Future<Item = F::Item, Error = F::Error> + Send> {
     Box::new(f)
 }
