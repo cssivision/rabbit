@@ -1,101 +1,88 @@
-use std::io as std_io;
-use std::mem;
+use std::io;
 use std::sync::{Arc, Mutex};
-
-use futures::{Future, Poll};
-use tokio_io::{AsyncRead, try_nb};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 use crate::util::other;
 
-pub struct DecryptReadExact<A, T> {
-    state: State<A, T>,
+use tokio::io::AsyncRead;
+
+macro_rules! ready {
+    ($e:expr $(,)?) => {
+        match $e {
+            std::task::Poll::Ready(t) => t,
+            std::task::Poll::Pending => return std::task::Poll::Pending,
+        }
+    };
 }
 
-enum State<A, T> {
-    Reading {
-        cipher: Arc<Mutex<Cipher>>,
-        reader: A,
-        buf: T,
-        pos: usize,
-    },
-    Empty,
+pub struct DecryptReadExact<'a, A: ?Sized> {
+    cipher: Arc<Mutex<Cipher>>,
+    reader: &'a mut A,
+    buf: &'a mut [u8],
+    pos: usize,
 }
 
-pub fn read_exact<A, T>(cipher: Arc<Mutex<Cipher>>, reader: A, buf: T) -> DecryptReadExact<A, T>
+pub fn read_exact<'a, A>(cipher: Arc<Mutex<Cipher>>, reader: &'a mut A, buf: &'a mut [u8]) -> DecryptReadExact<'a, A>
 where
-    A: AsyncRead,
-    T: AsMut<[u8]>,
+    A: AsyncRead + Unpin + ?Sized,
 {
     DecryptReadExact {
-        state: State::Reading {
-            reader: reader,
-            buf: buf,
-            pos: 0,
-            cipher: cipher,
-        },
+        cipher: cipher,
+        reader,
+        buf,
+        pos: 0,
     }
 }
 
-fn eof() -> std_io::Error {
-    std_io::Error::new(std_io::ErrorKind::UnexpectedEof, "early eof")
+fn eof() -> io::Error {
+    io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
 }
 
-impl<A, T> Future for DecryptReadExact<A, T>
+impl<A> Future for DecryptReadExact<'_, A>
 where
-    A: AsyncRead,
-    T: AsMut<[u8]>,
+    A: AsyncRead + Unpin + ?Sized,
 {
-    type Item = (A, T);
-    type Error = std_io::Error;
+    type Output = io::Result<usize>;
 
-    fn poll(&mut self) -> Poll<(A, T), std_io::Error> {
-        match self.state {
-            State::Reading {
-                ref mut reader,
-                ref mut buf,
-                ref mut pos,
-                ref cipher,
-            } => {
-                let mut cipher = cipher.lock().unwrap();
-                let buf = buf.as_mut();
-                if cipher.dec.is_none() {
-                    let mut iv = vec![0u8; cipher.iv_len];
-                    while *pos < iv.len() {
-                        let n = try_nb!(reader.read(&mut iv[*pos..]));
-                        *pos += n;
-                        if n == 0 {
-                            return Err(eof());
-                        }
-                    }
-
-                    *pos = 0;
-                    cipher.iv = iv.clone();
-                    cipher.init_decrypt(&iv);
-                };
-
-                while *pos < buf.len() {
-                    let n = try_nb!(reader.read(&mut buf[*pos..]));
-                    *pos += n;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+        loop {
+            let me = &mut *self;
+            let mut cipher = me.cipher.lock().unwrap();
+            if cipher.dec.is_none() {
+                let mut iv = vec![0u8; cipher.iv_len];
+                while me.pos < iv.len() {
+                    let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut iv[me.pos..]))?;
+                    me.pos += n;
                     if n == 0 {
-                        return Err(eof());
+                        return Err(eof()).into();
                     }
                 }
 
-                let plain_data = match cipher.decrypt(&buf[..buf.len()]) {
-                    Some(b) => b,
-                    None => return Err(other("decrypt error")),
-                };
+                me.pos = 0;
+                cipher.iv = iv.clone();
+                cipher.init_decrypt(&iv);
+            };
 
-                let copy_len = buf.len();
-                buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
+            // if our buffer is empty, then we need to read some data to continue.
+            if me.pos < me.buf.len() {
+                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf[me.pos..]))?;
+                me.pos += n;
+                if n == 0 {
+                    return Err(eof()).into();
+                }
             }
-            State::Empty => panic!("poll a ReadExact after it's done"),
-        }
 
-        match mem::replace(&mut self.state, State::Empty) {
-            State::Reading { reader, buf, .. } => Ok((reader, buf).into()),
-            State::Empty => panic!(),
+            let plain_data = match cipher.decrypt(&me.buf[..me.buf.len()]) {
+                Some(b) => b,
+                None => return Err(other("decrypt error")).into(),
+            };
+
+            let copy_len = me.buf.len();
+            me.buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
+            return Poll::Ready(Ok(me.pos));
         }
     }
 }
