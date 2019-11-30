@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::net::{Ipv6Addr, Ipv4Addr, IpAddr};
+use std::net::{Ipv6Addr, Ipv4Addr};
 use std::io::Error;
 use std::str;
 

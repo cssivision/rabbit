@@ -9,15 +9,6 @@ use crate::util::other;
 
 use tokio::io::AsyncRead;
 
-macro_rules! ready {
-    ($e:expr $(,)?) => {
-        match $e {
-            std::task::Poll::Ready(t) => t,
-            std::task::Poll::Pending => return std::task::Poll::Pending,
-        }
-    };
-}
-
 pub struct DecryptReadExact<'a, A: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,
     reader: &'a mut A,

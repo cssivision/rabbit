@@ -1,10 +1,11 @@
 pub mod args;
 pub mod cipher;
 pub mod config;
-mod copy;
 pub mod io;
-mod read_exact;
 pub mod resolver;
 pub mod socks5;
+#[macro_use]
 pub mod util;
 mod write_all;
+mod read_exact;
+mod copy;
