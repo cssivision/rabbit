@@ -1,195 +1,196 @@
-use std::io as std_io;
-use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-// use futures::{Async, Future, Poll};
-// use tokio::net::TcpStream;
-// use tokio_io::{io, try_nb};
+use crate::cipher::Cipher;
+use crate::util::{other, eof};
 
-// use crate::cipher::Cipher;
-// use crate::util::other;
+use tokio::io::{AsyncRead, AsyncWrite};
 
-// /// A future representing reading all data from one side of a proxy connection
-// /// and decrypto data andthen writing it to another.
-// pub struct DecryptReadCopy {
-//     cipher: Arc<Mutex<Cipher>>,
-//     // The two I/O objects we'll be reading.
-//     reader: Arc<TcpStream>,
-//     writer: Arc<TcpStream>,
-//     buf: Vec<u8>,
-//     // The number of bytes we've written so far.
-//     amt: u64,
-//     pos: usize,
-//     cap: usize,
-//     read_done: bool,
-// }
+pub struct DecryptReadCopy<'a, R: ?Sized, W: ?Sized> {
+    cipher: Arc<Mutex<Cipher>>,
+    reader: &'a mut R,
+    read_done: bool,
+    writer: &'a mut W,
+    pos: usize,
+    cap: usize,
+    amt: u64,
+    buf: Box<[u8]>,
+}
 
-// pub fn decrypt_copy(
-//     reader: Arc<TcpStream>,
-//     writer: Arc<TcpStream>,
-//     cipher: Arc<Mutex<Cipher>>,
-// ) -> DecryptReadCopy {
-//     DecryptReadCopy {
-//         cipher: cipher,
-//         reader: reader,
-//         writer: writer,
-//         buf: vec![0; 2 * 1024],
-//         read_done: false,
-//         amt: 0,
-//         cap: 0,
-//         pos: 0,
-//     }
-// }
+pub fn decrypt_copy<'a, R, W>(cipher: Arc<Mutex<Cipher>>, reader: &'a mut R, writer: &'a mut W) -> DecryptReadCopy<'a, R, W>
+where
+    R: AsyncRead + Unpin + ?Sized,
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    DecryptReadCopy {
+        cipher: cipher,
+        reader,
+        read_done: false,
+        writer,
+        amt: 0,
+        pos: 0,
+        cap: 0,
+        buf: Box::new([0; 2048]),
+    }
+}
 
-// // Here we implement the `Future` trait for `DecryptReadCopy` directly.
-// // situations if needed.
-// impl Future for DecryptReadCopy {
-//     type Item = (u64, Arc<TcpStream>, Arc<TcpStream>);
-//     type Error = std_io::Error;
+impl<R, W> Future for DecryptReadCopy<'_, R, W>
+where
+    R: AsyncRead + Unpin + ?Sized,
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    type Output = io::Result<u64>;
 
-//     fn poll(&mut self) -> Poll<(u64, Arc<TcpStream>, Arc<TcpStream>), std_io::Error> {
-//         let mut reader = &*self.reader;
-//         let mut writer = &*self.writer;
-//         let mut cipher = self.cipher.lock().unwrap();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        let me = &mut *self;
+        let mut cipher = me.cipher.lock().unwrap();
+        if cipher.dec.is_none() {
+            let mut iv = vec![0u8; cipher.iv_len];
+            while me.pos < iv.len() {
+                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut iv[me.pos..]))?;
+                me.pos += n;
+                if n == 0 {
+                    return Err(eof()).into();
+                }
+            }
 
-//         if cipher.dec.is_none() {
-//             if let Async::Ready(t) =
-//                 try_nb!(io::read_exact(reader, vec![0u8; cipher.iv_len]).poll())
-//             {
-//                 cipher.iv = t.1.clone();
-//                 cipher.init_decrypt(&t.1);
-//             }
-//         }
+            me.pos = 0;
+            cipher.iv = iv.clone();
+            cipher.init_decrypt(&iv);
+        }
 
-//         loop {
-//             // If our buffer is empty, then we need to read some data to
-//             // continue.
-//             if self.pos == self.cap && !self.read_done {
-//                 let n = try_nb!(reader.read(&mut self.buf));
-//                 if n == 0 {
-//                     self.read_done = true;
-//                 } else {
-//                     let plain_data = match cipher.decrypt(&self.buf[..n]) {
-//                         Some(b) => b,
-//                         None => return Err(other("decrypt error")),
-//                     };
+        loop {
+            // If our buffer is empty, then we need to read some data to
+            // continue.
+            if me.pos == me.cap && !me.read_done {
+                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf))?;
+                if n == 0 {
+                    me.read_done = true;
+                } else {
+                    let plain_data = match cipher.decrypt(&me.buf[..n]) {
+                        Some(b) => b,
+                        None => return Err(other("decrypt error")).into(),
+                    };
 
-//                     self.buf[..n].copy_from_slice(&plain_data[..n]);
-//                     self.pos = 0;
-//                     self.cap = n;
-//                 }
-//             }
+                    me.buf[..n].copy_from_slice(&plain_data[..n]);
+                    me.pos = 0;
+                    me.cap = n;
+                }
+            }
 
-//             // If our self.buf has some data, let's write it out!
-//             while self.pos < self.cap {
-//                 let i = try_nb!(writer.write(&self.buf[self.pos..self.cap]));
-//                 if i == 0 {
-//                     return Err(std_io::Error::new(
-//                         std_io::ErrorKind::WriteZero,
-//                         "write zero byte into writer",
-//                     ));
-//                 } else {
-//                     self.pos += i;
-//                     self.amt += i as u64;
-//                 }
-//             }
+            // If our buffer has some data, let's write it out!
+            while me.pos < me.cap {
+                let i = ready!(Pin::new(&mut *me.writer).poll_write(cx, &me.buf[me.pos..me.cap]))?;
+                if i == 0 {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "write zero byte into writer",
+                    )));
+                } else {
+                    me.pos += i;
+                    me.amt += i as u64;
+                }
+            }
 
-//             if self.pos == self.cap && self.read_done {
-//                 try_nb!(writer.flush());
-//                 return Ok((self.amt, self.reader.clone(), self.writer.clone()).into());
-//             }
-//         }
-//     }
-// }
+            // If we've written all the data and we've seen EOF, flush out the
+            // data and finish the transfer.
+            if me.pos == me.cap && me.read_done {
+                ready!(Pin::new(&mut *me.writer).poll_flush(cx))?;
+                return Poll::Ready(Ok(me.amt));
+            }
+        }
+    }
+}
 
-// /// A future representing reading all data from one side of a proxy connection
-// /// and crypto data andthen writing it to another.
-// pub struct EncryptWriteCopy {
-//     cipher: Arc<Mutex<Cipher>>,
-//     // The two I/O objects we'll be reading.
-//     reader: Arc<TcpStream>,
-//     writer: Arc<TcpStream>,
-//     buf: Vec<u8>,
-//     // The number of bytes we've written so far.
-//     amt: u64,
-//     pos: usize,
-//     cap: usize,
-//     read_done: bool,
-// }
+pub struct EncryptWriteCopy<'a, R: ?Sized, W: ?Sized> {
+    cipher: Arc<Mutex<Cipher>>,
+    reader: &'a mut R,
+    read_done: bool,
+    writer: &'a mut W,
+    pos: usize,
+    cap: usize,
+    amt: u64,
+    buf: Box<[u8]>,
+}
 
-// pub fn encrypt_copy(
-//     reader: Arc<TcpStream>,
-//     writer: Arc<TcpStream>,
-//     cipher: Arc<Mutex<Cipher>>,
-// ) -> EncryptWriteCopy {
-//     EncryptWriteCopy {
-//         cipher: cipher,
-//         reader: reader,
-//         writer: writer,
-//         buf: vec![0; 2 * 1024],
-//         read_done: false,
-//         amt: 0,
-//         cap: 0,
-//         pos: 0,
-//     }
-// }
+pub fn encrypt_copy<'a, R, W>(cipher: Arc<Mutex<Cipher>>, reader: &'a mut R, writer: &'a mut W) -> EncryptWriteCopy<'a, R, W>
+where
+    R: AsyncRead + Unpin + ?Sized,
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    EncryptWriteCopy {
+        cipher: cipher,
+        reader,
+        read_done: false,
+        writer,
+        amt: 0,
+        pos: 0,
+        cap: 0,
+        buf: Box::new([0; 2048]),
+    }
+}
 
-// // Here we implement the `Future` trait for `EncryptWriteCopy` directly.
-// impl Future for EncryptWriteCopy {
-//     type Item = (u64, Arc<TcpStream>, Arc<TcpStream>);
-//     type Error = std_io::Error;
+impl<R, W> Future for EncryptWriteCopy<'_, R, W>
+where
+    R: AsyncRead + Unpin + ?Sized,
+    W: AsyncWrite + Unpin + ?Sized,
+{
+    type Output = io::Result<u64>;
 
-//     fn poll(&mut self) -> Poll<(u64, Arc<TcpStream>, Arc<TcpStream>), std_io::Error> {
-//         let mut reader = &*self.reader;
-//         let mut writer = &*self.writer;
-//         let mut cipher = self.cipher.lock().unwrap();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        let me = &mut *self;
+        let mut cipher = me.cipher.lock().unwrap();
+        if cipher.enc.is_none() {
+            cipher.init_encrypt();
+            me.pos = 0;
+            let n = cipher.iv.len();
+            me.cap = n;
+            me.buf[..n].copy_from_slice(&cipher.iv);
+        }
 
-//         if cipher.enc.is_none() {
-//             cipher.init_encrypt();
-//             self.pos = 0;
-//             self.cap = cipher.iv.len();
-//             for i in 0..self.cap {
-//                 self.buf[i] = cipher.iv[i];
-//             }
-//         }
+        loop {
+            // If our buffer is empty, then we need to read some data to
+            // continue.
+            if me.pos == me.cap && !me.read_done {
+                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf))?;
+                if n == 0 {
+                    me.read_done = true;
+                } else {
+                    let cipher_data = match cipher.encrypt(&me.buf[..n]) {
+                        Some(b) => b,
+                        None => return Err(other("encrypt error")).into(),
+                    };
 
-//         loop {
-//             // If our buffer is empty, then we need to read some data to
-//             // continue.
-//             if self.pos == self.cap && !self.read_done {
-//                 let n = try_nb!(reader.read(&mut self.buf));
-//                 if n == 0 {
-//                     self.read_done = true;
-//                 } else {
-//                     let cipher_data = match cipher.encrypt(&self.buf[..n]) {
-//                         Some(b) => b,
-//                         None => return Err(other("encrypt error")),
-//                     };
+                    me.buf[..n].copy_from_slice(&cipher_data[..n]);
 
-//                     self.buf[..n].copy_from_slice(&cipher_data[..n]);
-//                     self.pos = 0;
-//                     self.cap = n;
-//                 }
-//             }
+                    me.pos = 0;
+                    me.cap = n;
+                }
+            }
 
-//             // If our self.buf has some data, let's write it out!
-//             while self.pos < self.cap {
-//                 let i = try_nb!(writer.write(&self.buf[self.pos..self.cap]));
-//                 if i == 0 {
-//                     return Err(std_io::Error::new(
-//                         std_io::ErrorKind::WriteZero,
-//                         "write zero byte into writer",
-//                     ));
-//                 } else {
-//                     self.pos += i;
-//                     self.amt += i as u64;
-//                 }
-//             }
+            // If our buffer has some data, let's write it out!
+            while me.pos < me.cap {
+                let i = ready!(Pin::new(&mut *me.writer).poll_write(cx, &me.buf[me.pos..me.cap]))?;
+                if i == 0 {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "write zero byte into writer",
+                    )));
+                } else {
+                    me.pos += i;
+                    me.amt += i as u64;
+                }
+            }
 
-//             if self.pos == self.cap && self.read_done {
-//                 try_nb!(writer.flush());
-//                 return Ok((self.amt, self.reader.clone(), self.writer.clone()).into());
-//             }
-//         }
-//     }
-// }
+            // If we've written all the data and we've seen EOF, flush out the
+            // data and finish the transfer.
+            if me.pos == me.cap && me.read_done {
+                ready!(Pin::new(&mut *me.writer).poll_flush(cx))?;
+                return Poll::Ready(Ok(me.amt));
+            }
+        }
+    }
+}

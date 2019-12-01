@@ -21,7 +21,9 @@ getopts = "0.2"
 openssl = "0.10"
 rand = "0.5"
 md5 = "0.3"
+tokio01 = { version = "0.1", package = "tokio" }
 tokio = { version = "0.2", features = ["full"] }
-futures = "0.3"
+futures = { version = "0.3", features = ["compat"] }
+futures01 = { version = "0.1",  package = "futures" }
 tokio-timer = "0.2"
 lazy_static = "1.0"

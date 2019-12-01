@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
-use crate::util::other;
+use crate::util::{other, eof};
 
 use tokio::io::AsyncRead;
 
@@ -28,10 +28,6 @@ where
     }
 }
 
-fn eof() -> io::Error {
-    io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
-}
-
 impl<A> Future for DecryptReadExact<'_, A>
 where
     A: AsyncRead + Unpin + ?Sized,
@@ -39,26 +35,26 @@ where
     type Output = io::Result<usize>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        loop {
-            let me = &mut *self;
-            let mut cipher = me.cipher.lock().unwrap();
-            if cipher.dec.is_none() {
-                let mut iv = vec![0u8; cipher.iv_len];
-                while me.pos < iv.len() {
-                    let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut iv[me.pos..]))?;
-                    me.pos += n;
-                    if n == 0 {
-                        return Err(eof()).into();
-                    }
+        let me = &mut *self;
+        let mut cipher = me.cipher.lock().unwrap();
+        if cipher.dec.is_none() {
+            let mut iv = vec![0u8; cipher.iv_len];
+            while me.pos < iv.len() {
+                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut iv[me.pos..]))?;
+                me.pos += n;
+                if n == 0 {
+                    return Err(eof()).into();
                 }
+            }
 
-                me.pos = 0;
-                cipher.iv = iv.clone();
-                cipher.init_decrypt(&iv);
-            };
+            me.pos = 0;
+            cipher.iv = iv.clone();
+            cipher.init_decrypt(&iv);
+        };
 
+        loop {
             // if our buffer is empty, then we need to read some data to continue.
-            if me.pos < me.buf.len() {
+            while me.pos < me.buf.len() {
                 let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf[me.pos..]))?;
                 me.pos += n;
                 if n == 0 {
