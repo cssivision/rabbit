@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let proxy = proxy(config.clone(), cipher, socket).map(|r| {
             if let Err(e) = r {
-                error!("Failed to proxy; error={}", e);
+                error!("failed to proxy; error={}", e);
             }
         });
 
