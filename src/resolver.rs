@@ -58,7 +58,7 @@ fn resolve01(host: &str) -> impl Future<Item = IpAddr, Error = io::Error> + Send
         } else {
             future::err(other("no ip return"))
         },
-        Err(_) => future::err(other("resolve fail")),
+        Err(e) => future::err(other(&format!("resolve fail: {:?}", e)))
     })
 }
 
