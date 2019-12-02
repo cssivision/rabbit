@@ -1,10 +1,24 @@
 use md5::compute;
 use std::io;
 
+#[macro_export]
+macro_rules! ready {
+    ($e:expr $(,)?) => {
+        match $e {
+            std::task::Poll::Ready(t) => t,
+            std::task::Poll::Pending => return std::task::Poll::Pending,
+        }
+    };
+}
+
 static MD5_LENGTH: u32 = 16;
 
 pub fn other(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
+}
+
+pub fn eof() -> io::Error {
+    io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
 }
 
 pub fn generate_key(data: &[u8], key_len: usize) -> Vec<u8> {

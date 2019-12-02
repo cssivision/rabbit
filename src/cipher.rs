@@ -37,7 +37,7 @@ impl Cipher {
 
     pub fn init_encrypt(&mut self) {
         if self.iv.is_empty() {
-            let mut rng = thread_rng();
+            let rng = thread_rng();
             self.iv = rng.sample_iter(&Standard).take(self.iv_len).collect();
         }
         self.enc = Some(
