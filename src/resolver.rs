@@ -9,13 +9,7 @@ use futures::prelude::*;
 
 lazy_static! {
     // setup the global Resolver
-    static ref POOL: ThreadPool = {
-        let num_threads = num_cpus::get();
-        ThreadPool::builder()
-                .pool_size(num_threads)
-                .create()
-                .unwrap()
-    };
+    static ref POOL: ThreadPool = ThreadPool::builder().create().unwrap();
 }
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
