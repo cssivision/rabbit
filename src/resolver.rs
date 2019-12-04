@@ -1,46 +1,26 @@
-use std::net::{ToSocketAddrs, IpAddr};
 use std::io;
+use std::net::{IpAddr, ToSocketAddrs};
 
 use crate::util::other;
 
-use futures::executor::ThreadPool;
-use lazy_static::lazy_static;
-use futures::prelude::*;
-
-lazy_static! {
-    // setup the global Resolver
-    static ref POOL: ThreadPool = ThreadPool::builder().create().unwrap();
-}
-
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     let host = format!("{}:0", host);
-    let (tx, rx) = futures::channel::oneshot::channel();
-
-    POOL.spawn_obj_ok(
-        async move {
-            let _ = tx.send(match host[..].to_socket_addrs() {
-                Ok(it) => {
-                    let mut it = it.filter(|x| match x.ip() {
-                        IpAddr::V4(_) => true,
-                        _ => false,
-                    });
-                    if let Some(addr) = it.next() {
-                        Ok(addr.ip())
-                    } else {
-                        Err(other("no ip return"))
-                    }
-                },
-                Err(e) => Err(e),
+    let ip = tokio::task::spawn_blocking(move || match host[..].to_socket_addrs() {
+        Ok(it) => {
+            let mut it = it.filter(|x| match x.ip() {
+                IpAddr::V4(_) => true,
+                IpAddr::V6(_) => false,
             });
-        }.boxed().into()
-    );
-
-    rx.await.unwrap_or_else(|_| {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Interrupted,
-            "Resolver future has been dropped",
-        ))
+            if let Some(addr) = it.next() {
+                Ok(addr.ip())
+            } else {
+                Err(other("no ip return"))
+            }
+        }
+        Err(e) => Err(e),
     })
+    .await?;
+    ip
 }
 
 // use trust_dns_resolver::AsyncResolver;
