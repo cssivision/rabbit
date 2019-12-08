@@ -9,7 +9,7 @@ use shadowsocks::config::Config;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{decrypt_copy, encrypt_copy, read_exact};
-use shadowsocks::resolver::resolve;
+use shadowsocks::resolver::{resolve, async_resolve};
 use shadowsocks::socks5::v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN};
 use shadowsocks::util::other;
 
@@ -44,7 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn proxy(config: Config, cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> Result<(u64, u64), Error> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     println!("proxy to address: {}:{}", host, port);
-    let addr = resolve(&host).await?;
+    // let addr = resolve(&host).await?;
+    let addr = async_resolve(&host).await?;
     debug!("resolver addr to ip: {}", addr);
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
     

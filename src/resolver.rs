@@ -36,7 +36,7 @@ lazy_static! {
     };
 }
 
-async fn async_resolve(host: &str) -> io::Result<IpAddr> {
+pub async fn async_resolve(host: &str) -> io::Result<IpAddr> {
     match GLOBAL_DNS_RESOLVER.lookup_ip(host).await {
         Ok(r) => {
             if let Some(addr) = r.iter().next() {
