@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use log::error;
@@ -17,11 +17,19 @@ pub struct EncryptWriteAll<'a, W: ?Sized> {
     buf: &'a [u8],
 }
 
-pub fn write_all<'a, W>(cipher: Arc<Mutex<Cipher>>,writer: &'a mut W, buf: &'a [u8]) -> EncryptWriteAll<'a, W>
+pub fn write_all<'a, W>(
+    cipher: Arc<Mutex<Cipher>>,
+    writer: &'a mut W,
+    buf: &'a [u8],
+) -> EncryptWriteAll<'a, W>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
-    EncryptWriteAll { cipher, writer, buf }
+    EncryptWriteAll {
+        cipher,
+        writer,
+        buf,
+    }
 }
 
 impl<W> Future for EncryptWriteAll<'_, W>
@@ -31,7 +39,6 @@ where
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-
         let me = &mut *self;
         let mut cipher = me.cipher.lock().unwrap();
         let mut data = if cipher.enc.is_none() {

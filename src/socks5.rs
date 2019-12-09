@@ -4,8 +4,8 @@ use std::str;
 
 use crate::util::other;
 
-use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 pub mod v5 {
     pub const VERSION: u8 = 5;
@@ -32,7 +32,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
     let buf2 = &mut [0u8, buf1[1] as u8];
     conn.read_exact(buf2).await?;
 
-    let buf3 = &mut [v5::VERSION, v5::METH_NO_AUTH]; 
+    let buf3 = &mut [v5::VERSION, v5::METH_NO_AUTH];
     conn.write_all(buf3).await?;
 
     // check version
@@ -51,7 +51,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
 
     // there's one byte which is reserved for future use, so we read it and discard it.
     conn.read_exact(&mut [0u8]).await?;
-    let address_type = &mut [0u8]; 
+    let address_type = &mut [0u8];
     conn.read_exact(address_type).await?;
 
     let result = match address_type[0] {
@@ -63,7 +63,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
             Ok((format!("{}", addr), port))
-        },
+        }
 
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
@@ -81,7 +81,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
             Ok((format!("{}", addr), port))
-        },
+        }
 
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
@@ -101,7 +101,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
             Ok((hostname.to_string(), port))
-        },
+        }
         n => {
             let msg = format!("unknown address type, received: {}", n);
             Err(other(&msg))

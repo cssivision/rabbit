@@ -1,24 +1,25 @@
+use std::io::Error;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
-use std::io::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use log::{debug, error};
 
-use shadowsocks_rs as shadowsocks;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
+use shadowsocks::config::Config;
 use shadowsocks::io::{decrypt_copy, encrypt_copy, write_all};
 use shadowsocks::socks5::{
     self,
-    v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN},
+    v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
 };
-use shadowsocks::config::Config;
+use shadowsocks::util::other;
 
-use futures::FutureExt;
 use futures::future::try_join;
+use futures::FutureExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,8 +30,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut listener = TcpListener::bind(&config.local_addr).await?;
     println!("Listening connections on {}", config.local_addr);
     let cipher = Cipher::new(&config.method, &config.password);
-    
-    
     loop {
         let config = config.clone();
         let (socket, _) = listener.accept().await?;
@@ -46,8 +45,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn proxy(config: Config, cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> Result<(u64, u64), Error> {
-    let (host, port) = socks5::serve(&mut socket1).await?;
+async fn proxy(
+    config: Config,
+    cipher: Arc<Mutex<Cipher>>,
+    mut socket1: TcpStream,
+) -> Result<(u64, u64), Error> {
+    let socks5_serve = timeout(Duration::from_secs(1), socks5::serve(&mut socket1)).await?;
+    if socks5_serve.is_err() {
+        return Err(other("socks5 handshake timout"));
+    }
+    let (host, port) = socks5_serve.unwrap();
     println!("proxy to address: {}:{}", host, port);
 
     let mut socket2 = TcpStream::connect(&config.server_addr).await?;

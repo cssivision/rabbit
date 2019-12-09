@@ -1,22 +1,21 @@
-use std::sync::{Arc, Mutex};
-use std::net::{Ipv6Addr, Ipv4Addr, SocketAddr};
 use std::io::Error;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use shadowsocks_rs as shadowsocks;
-use shadowsocks::config::Config;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
+use shadowsocks::config::Config;
 use shadowsocks::io::{decrypt_copy, encrypt_copy, read_exact};
-use shadowsocks::resolver::{resolve, async_resolve};
-use shadowsocks::socks5::v5::{TYPE_IPV4, TYPE_IPV6, TYPE_DOMAIN};
+use shadowsocks::resolver::resolve;
+use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 
-use tokio::net::{TcpListener, TcpStream};
-use log::{debug, error};
-use futures::FutureExt;
 use futures::future::try_join;
+use futures::FutureExt;
+use log::{debug, error};
+use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,14 +40,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn proxy(config: Config, cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> Result<(u64, u64), Error> {
+async fn proxy(
+    config: Config,
+    cipher: Arc<Mutex<Cipher>>,
+    mut socket1: TcpStream,
+) -> Result<(u64, u64), Error> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     println!("proxy to address: {}:{}", host, port);
     // let addr = resolve(&host).await?;
-    let addr = async_resolve(&host).await?;
+    let addr = resolve(&host).await?;
     debug!("resolver addr to ip: {}", addr);
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
-    
     let keepalive_period = config.keepalive_period;
     let _ = socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
     let _ = socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
@@ -62,7 +64,10 @@ async fn proxy(config: Config, cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStrea
     Ok((n1, n2))
 }
 
-async fn get_addr_info(cipher: Arc<Mutex<Cipher>>, conn: &mut TcpStream) -> Result<(String, u16), Error> {
+async fn get_addr_info(
+    cipher: Arc<Mutex<Cipher>>,
+    conn: &mut TcpStream,
+) -> Result<(String, u16), Error> {
     let t = &mut vec![0u8; 1];
     let _ = read_exact(cipher.clone(), conn, t).await?;
 
@@ -75,7 +80,7 @@ async fn get_addr_info(cipher: Arc<Mutex<Cipher>>, conn: &mut TcpStream) -> Resu
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
             return Ok((format!("{}", addr), port));
-        },
+        }
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
         TYPE_IPV6 => {
@@ -95,7 +100,7 @@ async fn get_addr_info(cipher: Arc<Mutex<Cipher>>, conn: &mut TcpStream) -> Resu
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
             return Ok((format!("{}", addr), port));
-        },
+        }
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
         TYPE_DOMAIN => {
@@ -114,7 +119,7 @@ async fn get_addr_info(cipher: Arc<Mutex<Cipher>>, conn: &mut TcpStream) -> Resu
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
             return Ok((hostname.to_string(), port));
-        },
+        }
         n => {
             error!("unknown address type, received: {}", n);
             return Err(other("unknown address type, received"));

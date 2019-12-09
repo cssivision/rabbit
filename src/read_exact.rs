@@ -1,11 +1,11 @@
-use std::io;
-use std::sync::{Arc, Mutex};
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
-use crate::util::{other, eof};
+use crate::util::{eof, other};
 
 use tokio::io::AsyncRead;
 
@@ -16,7 +16,11 @@ pub struct DecryptReadExact<'a, A: ?Sized> {
     pos: usize,
 }
 
-pub fn read_exact<'a, A>(cipher: Arc<Mutex<Cipher>>, reader: &'a mut A, buf: &'a mut [u8]) -> DecryptReadExact<'a, A>
+pub fn read_exact<'a, A>(
+    cipher: Arc<Mutex<Cipher>>,
+    reader: &'a mut A,
+    buf: &'a mut [u8],
+) -> DecryptReadExact<'a, A>
 where
     A: AsyncRead + Unpin + ?Sized,
 {

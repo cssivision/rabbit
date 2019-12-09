@@ -1,11 +1,11 @@
-use std::sync::{Arc, Mutex};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
-use crate::util::{other, eof};
+use crate::util::{eof, other};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -20,7 +20,11 @@ pub struct DecryptReadCopy<'a, R: ?Sized, W: ?Sized> {
     buf: Box<[u8]>,
 }
 
-pub fn decrypt_copy<'a, R, W>(cipher: Arc<Mutex<Cipher>>, reader: &'a mut R, writer: &'a mut W) -> DecryptReadCopy<'a, R, W>
+pub fn decrypt_copy<'a, R, W>(
+    cipher: Arc<Mutex<Cipher>>,
+    reader: &'a mut R,
+    writer: &'a mut W,
+) -> DecryptReadCopy<'a, R, W>
 where
     R: AsyncRead + Unpin + ?Sized,
     W: AsyncWrite + Unpin + ?Sized,
@@ -116,7 +120,11 @@ pub struct EncryptWriteCopy<'a, R: ?Sized, W: ?Sized> {
     buf: Box<[u8]>,
 }
 
-pub fn encrypt_copy<'a, R, W>(cipher: Arc<Mutex<Cipher>>, reader: &'a mut R, writer: &'a mut W) -> EncryptWriteCopy<'a, R, W>
+pub fn encrypt_copy<'a, R, W>(
+    cipher: Arc<Mutex<Cipher>>,
+    reader: &'a mut R,
+    writer: &'a mut W,
+) -> EncryptWriteCopy<'a, R, W>
 where
     R: AsyncRead + Unpin + ?Sized,
     W: AsyncWrite + Unpin + ?Sized,

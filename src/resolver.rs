@@ -1,5 +1,5 @@
 use std::io;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 
 use crate::util::other;
 
@@ -7,25 +7,25 @@ use lazy_static::lazy_static;
 use tokio;
 use trust_dns_resolver::AsyncResolver;
 
-pub async fn resolve(host: &str) -> io::Result<IpAddr> {
-    let host = format!("{}:0", host);
-    let ip = tokio::task::spawn_blocking(move || match host[..].to_socket_addrs() {
-        Ok(it) => {
-            let mut it = it.filter(|x| match x.ip() {
-                IpAddr::V4(_) => true,
-                IpAddr::V6(_) => false,
-            });
-            if let Some(addr) = it.next() {
-                Ok(addr.ip())
-            } else {
-                Err(other("no ip return"))
-            }
-        }
-        Err(e) => Err(e),
-    })
-    .await?;
-    ip
-}
+// pub async fn resolve(host: &str) -> io::Result<IpAddr> {
+//     let host = format!("{}:0", host);
+//     let ip = tokio::task::spawn_blocking(move || match host[..].to_socket_addrs() {
+//         Ok(it) => {
+//             let mut it = it.filter(|x| match x.ip() {
+//                 IpAddr::V4(_) => true,
+//                 IpAddr::V6(_) => false,
+//             });
+//             if let Some(addr) = it.next() {
+//                 Ok(addr.ip())
+//             } else {
+//                 Err(other("no ip return"))
+//             }
+//         }
+//         Err(e) => Err(e),
+//     })
+//     .await?;
+//     ip
+// }
 
 lazy_static! {
     // setup the global Resolver
@@ -36,7 +36,7 @@ lazy_static! {
     };
 }
 
-pub async fn async_resolve(host: &str) -> io::Result<IpAddr> {
+pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     match GLOBAL_DNS_RESOLVER.lookup_ip(host).await {
         Ok(r) => {
             if let Some(addr) = r.iter().next() {
