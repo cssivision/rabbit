@@ -114,8 +114,5 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
     let resp = &[0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43];
     conn.write_all(resp).await?;
 
-    // let timeout = Timeout::new(handshake_finish, Duration::new(10, 0))
-    //     .map_err(|_| other("handshake timeout"));
-
     result
 }
