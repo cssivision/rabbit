@@ -1,6 +1,6 @@
 [package]
 name = "shadowsocks-rs"
-version = "0.4.2"
+version = "0.5.0"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/cssivision/shadowsocks-rs"

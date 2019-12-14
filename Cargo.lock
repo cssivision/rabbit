@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "shadowsocks-rs"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "env_logger 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
