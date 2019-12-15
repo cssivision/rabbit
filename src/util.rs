@@ -1,7 +1,6 @@
 use md5::compute;
 use std::io;
 
-#[macro_export]
 macro_rules! ready {
     ($e:expr $(,)?) => {
         match $e {
