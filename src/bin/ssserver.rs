@@ -47,10 +47,12 @@ async fn proxy(
 ) -> Result<(u64, u64), Error> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     println!("proxy to address: {}:{}", host, port);
-    // let addr = resolve(&host).await?;
+
     let addr = resolve(&host).await?;
     debug!("resolver addr to ip: {}", addr);
+
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
+
     let keepalive_period = config.keepalive_period;
     let _ = socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
     let _ = socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
@@ -59,6 +61,7 @@ async fn proxy(
     let (mut socket2_reader, mut socket2_writer) = socket2.split();
     let half1 = decrypt_copy(cipher.clone(), &mut socket1_reader, &mut socket2_writer);
     let half2 = encrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
+
     let (n1, n2) = try_join(half1, half2).await?;
     debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
