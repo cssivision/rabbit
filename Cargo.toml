@@ -25,4 +25,4 @@ md5 = "0.3"
 tokio = { version = "0.2", features = ["full"] }
 futures = { version = "0.3", features = ["thread-pool", "alloc"] }
 lazy_static = "1.0"
-trust-dns-resolver = { version = "0.18.0-alpha" }
+trust-dns-resolver = "0.19" 

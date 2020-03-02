@@ -4,8 +4,8 @@ use std::net::IpAddr;
 use crate::util::other;
 
 use lazy_static::lazy_static;
-use tokio;
-use trust_dns_resolver::AsyncResolver;
+use tokio::runtime::Runtime;
+use trust_dns_resolver::{AsyncResolver, TokioAsyncResolver};
 
 // pub async fn resolve(host: &str) -> io::Result<IpAddr> {
 //     let host = format!("{}:0", host);
@@ -29,10 +29,12 @@ use trust_dns_resolver::AsyncResolver;
 
 lazy_static! {
     // setup the global Resolver
-    static ref GLOBAL_DNS_RESOLVER: AsyncResolver = {
-        let (resolver, bg) = AsyncResolver::from_system_conf().expect("Failed to create AsyncResolver");
-        tokio::spawn(bg);
-        resolver
+    static ref GLOBAL_DNS_RESOLVER: TokioAsyncResolver = {
+        let mut runtime = Runtime::new().expect("Failed to create runtime");
+        let resolver = AsyncResolver::from_system_conf(runtime.handle().clone());
+        runtime
+            .block_on(resolver)
+            .expect("failed to create resolver")
     };
 }
 
