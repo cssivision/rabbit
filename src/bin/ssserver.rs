@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::sync::{Arc, Mutex};
@@ -44,7 +44,7 @@ async fn proxy(
     config: Config,
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
-) -> Result<(u64, u64), Error> {
+) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     println!("proxy to address: {}:{}", host, port);
 
@@ -70,7 +70,7 @@ async fn proxy(
 async fn get_addr_info(
     cipher: Arc<Mutex<Cipher>>,
     conn: &mut TcpStream,
-) -> Result<(String, u16), Error> {
+) -> io::Result<(String, u16)> {
     let t = &mut vec![0u8; 1];
     let _ = read_exact(cipher.clone(), conn, t).await?;
 
