@@ -26,7 +26,7 @@ impl Cipher {
 
         let key = generate_key(password.as_bytes(), cipher.key_len());
         Cipher {
-            cipher: cipher,
+            cipher,
             key: Vec::from(&key[..]),
             iv: vec![],
             iv_len: cipher.iv_len().unwrap_or_default(),
@@ -41,25 +41,15 @@ impl Cipher {
             self.iv = rng.sample_iter(&Standard).take(self.iv_len).collect();
         }
         self.enc = Some(
-            symm::Crypter::new(
-                self.cipher.clone(),
-                symm::Mode::Encrypt,
-                &self.key,
-                Some(&self.iv),
-            )
-            .expect("init enc error"),
+            symm::Crypter::new(self.cipher, symm::Mode::Encrypt, &self.key, Some(&self.iv))
+                .expect("init enc error"),
         );
     }
 
     pub fn init_decrypt(&mut self, iv: &[u8]) {
         self.dec = Some(
-            symm::Crypter::new(
-                self.cipher.clone(),
-                symm::Mode::Decrypt,
-                &self.key,
-                Some(iv),
-            )
-            .expect("init enc error"),
+            symm::Crypter::new(self.cipher, symm::Mode::Decrypt, &self.key, Some(iv))
+                .expect("init enc error"),
         );
     }
 
@@ -71,7 +61,7 @@ impl Cipher {
                 return Some(out);
             }
         }
-        return None;
+        None
     }
 
     pub fn decrypt(&mut self, input: &[u8]) -> Option<Vec<u8>> {
@@ -83,12 +73,12 @@ impl Cipher {
                 return Some(out);
             }
         }
-        return None;
+        None
     }
 
     pub fn reset(&self) -> Cipher {
         Cipher {
-            cipher: self.cipher.clone(),
+            cipher: self.cipher,
             key: self.key.clone(),
             iv: vec![],
             iv_len: self.iv_len,

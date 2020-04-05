@@ -62,8 +62,8 @@ async fn proxy(
     write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
 
     let keepalive_period = config.keepalive_period;
-    let _ = socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
-    let _ = socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
+    socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
+    socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
 
     let (mut socket1_reader, mut socket1_writer) = socket1.split();
     let (mut socket2_reader, mut socket2_writer) = socket2.split();
@@ -94,5 +94,5 @@ fn generate_raw_addr(host: &str, port: u16) -> Vec<u8> {
     let mut rawaddr = vec![TYPE_DOMAIN, dm_len as u8];
     rawaddr.extend_from_slice(host.as_bytes());
     rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-    return rawaddr;
+    rawaddr
 }

@@ -25,7 +25,7 @@ where
     A: AsyncRead + Unpin + ?Sized,
 {
     DecryptReadExact {
-        cipher: cipher,
+        cipher,
         reader,
         buf,
         pos: 0,
@@ -56,24 +56,22 @@ where
             cipher.init_decrypt(&iv);
         };
 
-        loop {
-            // if our buffer is empty, then we need to read some data to continue.
-            while me.pos < me.buf.len() {
-                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf[me.pos..]))?;
-                me.pos += n;
-                if n == 0 {
-                    return Err(eof()).into();
-                }
+        // if our buffer is empty, then we need to read some data to continue.
+        while me.pos < me.buf.len() {
+            let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf[me.pos..]))?;
+            me.pos += n;
+            if n == 0 {
+                return Err(eof()).into();
             }
-
-            let plain_data = match cipher.decrypt(&me.buf[..me.buf.len()]) {
-                Some(b) => b,
-                None => return Err(other("decrypt error")).into(),
-            };
-
-            let copy_len = me.buf.len();
-            me.buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
-            return Poll::Ready(Ok(me.pos));
         }
+
+        let plain_data = match cipher.decrypt(&me.buf[..me.buf.len()]) {
+            Some(b) => b,
+            None => return Err(other("decrypt error")).into(),
+        };
+
+        let copy_len = me.buf.len();
+        me.buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
+        Poll::Ready(Ok(me.pos))
     }
 }

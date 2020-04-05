@@ -30,7 +30,7 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     DecryptReadCopy {
-        cipher: cipher,
+        cipher,
         reader,
         read_done: false,
         writer,
@@ -130,7 +130,7 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     EncryptWriteCopy {
-        cipher: cipher,
+        cipher,
         reader,
         read_done: false,
         writer,

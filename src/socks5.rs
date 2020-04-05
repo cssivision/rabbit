@@ -1,3 +1,4 @@
+#![allow(clippy::many_single_char_names)]
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;

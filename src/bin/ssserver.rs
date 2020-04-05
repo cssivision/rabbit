@@ -1,3 +1,4 @@
+#![allow(clippy::many_single_char_names)]
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
@@ -65,8 +66,8 @@ async fn proxy(
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
 
     let keepalive_period = config.keepalive_period;
-    let _ = socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
-    let _ = socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
+    socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
+    socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
 
     let (mut socket1_reader, mut socket1_writer) = socket1.split();
     let (mut socket2_reader, mut socket2_writer) = socket2.split();
@@ -82,10 +83,10 @@ async fn get_addr_info(
     cipher: Arc<Mutex<Cipher>>,
     conn: &mut TcpStream,
 ) -> io::Result<(String, u16)> {
-    let t = &mut vec![0u8; 1];
-    let _ = read_exact(cipher.clone(), conn, t).await?;
+    let address_type = &mut vec![0u8; 1];
+    let _ = read_exact(cipher.clone(), conn, address_type).await?;
 
-    match t[0] {
+    match address_type[0] {
         // For IPv4 addresses, we read the 4 bytes for the address as
         // well as 2 bytes for the port.
         TYPE_IPV4 => {
@@ -93,7 +94,7 @@ async fn get_addr_info(
             let _ = read_exact(cipher.clone(), conn, buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
-            return Ok((format!("{}", addr), port));
+            Ok((format!("{}", addr), port))
         }
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
@@ -113,7 +114,7 @@ async fn get_addr_info(
 
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
-            return Ok((format!("{}", addr), port));
+            Ok((format!("{}", addr), port))
         }
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
@@ -132,11 +133,11 @@ async fn get_addr_info(
 
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
-            return Ok((hostname.to_string(), port));
+            Ok((hostname.to_string(), port))
         }
         n => {
             error!("unknown address type, received: {}", n);
-            return Err(other("unknown address type, received"));
+            Err(other("unknown address type, received"))
         }
     }
 }
