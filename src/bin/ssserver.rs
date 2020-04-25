@@ -15,7 +15,7 @@ use shadowsocks::util::other;
 
 use futures::future::try_join;
 use futures::FutureExt;
-use log::{debug, error};
+use log::{debug, error, info};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
 use trust_dns_resolver::TokioAsyncResolver;
@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("failed to create resolver");
 
     let config = parse_args("ssserver").expect("invalid config");
-    println!("{}", serde_json::to_string_pretty(&config).unwrap());
+    info!("{}", serde_json::to_string_pretty(&config).unwrap());
 
     let cipher = Cipher::new(&config.method, &config.password);
     rt.block_on(async {
@@ -58,7 +58,7 @@ async fn proxy(
     resolver: TokioAsyncResolver,
 ) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
-    println!("proxy to address: {}:{}", host, port);
+    info!("proxy to address: {}:{}", host, port);
 
     let addr = resolve(resolver, &host).await?;
     debug!("resolver addr to ip: {}", addr);
