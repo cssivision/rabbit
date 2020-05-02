@@ -55,10 +55,10 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
     let address_type = &mut [0u8];
     conn.read_exact(address_type).await?;
 
-    let result = match address_type[0] {
+    let result = match address_type.get(0) {
         // For IPv4 addresses, we read the 4 bytes for the address as
         // well as 2 bytes for the port.
-        v5::TYPE_IPV4 => {
+        Some(&v5::TYPE_IPV4) => {
             let buf = &mut [0u8; 6];
             conn.read_exact(buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
@@ -68,7 +68,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
 
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
-        v5::TYPE_IPV6 => {
+        Some(&v5::TYPE_IPV6) => {
             let buf = &mut [0u8; 18];
             conn.read_exact(buf).await?;
             let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
@@ -86,7 +86,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
 
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
-        v5::TYPE_DOMAIN => {
+        Some(&v5::TYPE_DOMAIN) => {
             let buf1 = &mut [0u8];
             conn.read_exact(buf1).await?;
             let buf2 = &mut vec![0u8; buf1[0] as usize + 2];
@@ -104,7 +104,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             Ok((hostname.to_string(), port))
         }
         n => {
-            let msg = format!("unknown address type, received: {}", n);
+            let msg = format!("unknown address type, received: {:?}", n);
             Err(other(&msg))
         }
     };

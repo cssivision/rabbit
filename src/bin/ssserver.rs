@@ -86,10 +86,10 @@ async fn get_addr_info(
     let address_type = &mut vec![0u8; 1];
     let _ = read_exact(cipher.clone(), conn, address_type).await?;
 
-    match address_type[0] {
+    match address_type.get(0) {
         // For IPv4 addresses, we read the 4 bytes for the address as
         // well as 2 bytes for the port.
-        TYPE_IPV4 => {
+        Some(&TYPE_IPV4) => {
             let buf = &mut vec![0u8; 6];
             let _ = read_exact(cipher.clone(), conn, buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
@@ -98,7 +98,7 @@ async fn get_addr_info(
         }
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
-        TYPE_IPV6 => {
+        Some(&TYPE_IPV6) => {
             let buf = &mut vec![0u8; 18];
 
             let _ = read_exact(cipher.clone(), conn, buf).await?;
@@ -118,7 +118,7 @@ async fn get_addr_info(
         }
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
-        TYPE_DOMAIN => {
+        Some(&TYPE_DOMAIN) => {
             let buf1 = &mut vec![0u8];
             let _ = read_exact(cipher.clone(), conn, buf1).await?;
             let buf2 = &mut vec![0u8; buf1[0] as usize + 2];
@@ -136,7 +136,7 @@ async fn get_addr_info(
             Ok((hostname.to_string(), port))
         }
         n => {
-            error!("unknown address type, received: {}", n);
+            error!("unknown address type, received: {:?}", n);
             Err(other("unknown address type, received"))
         }
     }
