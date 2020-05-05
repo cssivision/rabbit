@@ -28,7 +28,7 @@ config.json
 # Usage 
 #### server
 ```sh
-ssserver -c config.json
+RUST_LOG=info ssserver -c config.json
 ```
 
 install a [client](https://shadowsocks.org/en/download/clients.html), connect to your server using your configuration, Done!
