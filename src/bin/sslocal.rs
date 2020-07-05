@@ -4,8 +4,6 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use log::{debug, error, info};
-
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::config::Config;
@@ -25,10 +23,10 @@ use tokio::time::timeout;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
-    info!("{}", serde_json::to_string_pretty(&config).unwrap());
+    log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
 
     let mut listener = TcpListener::bind(&config.local_addr).await?;
-    info!("Listening connections on {}", config.local_addr);
+    log::info!("Listening connections on {}", config.local_addr);
     let cipher = Cipher::new(&config.method, &config.password);
     loop {
         let config = config.clone();
@@ -37,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let proxy = proxy(config.clone(), cipher, socket).map(|r| {
             if let Err(e) = r {
-                error!("failed to proxy; error={}", e);
+                log::error!("failed to proxy; error={}", e);
             }
         });
 
@@ -55,7 +53,7 @@ async fn proxy(
         return Err(other("socks5 handshake timout"));
     }
     let (host, port) = socks5_serve.unwrap();
-    info!("proxy to address: {}:{}", host, port);
+    log::info!("proxy to address: {}:{}", host, port);
 
     let mut socket2 = TcpStream::connect(&config.server_addr).await?;
     let rawaddr = generate_raw_addr(&host, port);
@@ -71,7 +69,7 @@ async fn proxy(
     let half2 = decrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
 
     let (n1, n2) = try_join(half1, half2).await?;
-    debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
+    log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
 

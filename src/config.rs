@@ -2,7 +2,6 @@ use std::env;
 use std::path::Path;
 use std::{fs, io};
 
-use log::error;
 use serde_derive::{Deserialize, Serialize};
 
 static LOCAL_ADDR: &str = "0.0.0.0:6009";
@@ -30,7 +29,7 @@ impl Config {
             let config = match serde_json::from_str(&contents) {
                 Ok(c) => c,
                 Err(e) => {
-                    error!("{}", e);
+                    log::error!("{}", e);
                     return Err(io::Error::new(io::ErrorKind::Other, e));
                 }
             };

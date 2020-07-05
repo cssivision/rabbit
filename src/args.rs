@@ -4,7 +4,6 @@ use std::process;
 use crate::config::Config;
 
 use getopts::Options;
-use log::error;
 
 pub fn parse_args(name: &str) -> Option<Config> {
     let args: Vec<String> = env::args().collect();
@@ -30,7 +29,7 @@ pub fn parse_args(name: &str) -> Option<Config> {
     match Config::new(path) {
         Ok(c) => Some(c),
         Err(e) => {
-            error!("{}", e);
+            log::error!("{}", e);
             None
         }
     }

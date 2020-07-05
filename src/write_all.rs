@@ -4,8 +4,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use log::error;
-
 use crate::cipher::Cipher;
 use crate::util::other;
 
@@ -51,7 +49,7 @@ where
         let cipher_buf = match cipher.encrypt(&me.buf) {
             Some(b) => Vec::from(&b[..me.buf.len()]),
             None => {
-                error!("encrypt error");
+                log::error!("encrypt error");
                 return Err(other("encrypt error!")).into();
             }
         };

@@ -15,7 +15,6 @@ use shadowsocks::util::other;
 
 use futures::future::try_join;
 use futures::FutureExt;
-use log::{debug, error, info};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
 use trust_dns_resolver::TokioAsyncResolver;
@@ -29,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("failed to create resolver");
 
     let config = parse_args("ssserver").expect("invalid config");
-    info!("{}", serde_json::to_string_pretty(&config).unwrap());
+    log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
 
     let cipher = Cipher::new(&config.method, &config.password);
     rt.block_on(async {
@@ -42,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let proxy = proxy(config.clone(), cipher, socket, resolver.clone()).map(|r| {
                 if let Err(e) = r {
-                    error!("failed to proxy; error={}", e);
+                    log::error!("failed to proxy; error={}", e);
                 }
             });
 
@@ -58,10 +57,10 @@ async fn proxy(
     resolver: TokioAsyncResolver,
 ) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
-    info!("proxy to address: {}:{}", host, port);
+    log::info!("proxy to address: {}:{}", host, port);
 
     let addr = resolve(resolver, &host).await?;
-    debug!("resolver addr to ip: {}", addr);
+    log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
 
@@ -75,7 +74,7 @@ async fn proxy(
     let half2 = encrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
 
     let (n1, n2) = try_join(half1, half2).await?;
-    debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
+    log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
 
@@ -136,7 +135,7 @@ async fn get_addr_info(
             Ok((hostname.to_string(), port))
         }
         n => {
-            error!("unknown address type, received: {:?}", n);
+            log::error!("unknown address type, received: {:?}", n);
             Err(other("unknown address type, received"))
         }
     }
