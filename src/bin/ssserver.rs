@@ -33,11 +33,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cipher = Cipher::new(&config.method, &config.password);
     rt.block_on(async {
         let mut listener = TcpListener::bind(&config.server_addr).await?;
+        let config = Arc::new(config);
 
         loop {
-            let config = config.clone();
-            let (socket, _) = listener.accept().await?;
             let cipher = Arc::new(Mutex::new(cipher.reset()));
+            let (socket, _) = listener.accept().await?;
 
             let proxy = proxy(config.clone(), cipher, socket, resolver.clone()).map(|r| {
                 if let Err(e) = r {
@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn proxy(
-    config: Config,
+    config: Arc<Config>,
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
     resolver: TokioAsyncResolver,
