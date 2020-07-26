@@ -11,7 +11,7 @@ static METHOD: &str = "aes-256-cfb";
 static TIMEOUT: u64 = 100;
 static KEEPALIVE_PEARID: u64 = 600;
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(default)]
 pub struct Config {
     pub local_addr: String,
