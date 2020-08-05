@@ -1,5 +1,5 @@
 use std::io::Error;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -75,23 +75,25 @@ async fn proxy(
 }
 
 fn generate_raw_addr(host: &str, port: u16) -> Vec<u8> {
-    if let Ok(host) = Ipv4Addr::from_str(host) {
-        let mut rawaddr = vec![TYPE_IPV4];
-        rawaddr.extend_from_slice(&host.octets());
-        rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-        return rawaddr;
+    match IpAddr::from_str(host) {
+        Ok(IpAddr::V4(host)) => {
+            let mut rawaddr = vec![TYPE_IPV4];
+            rawaddr.extend_from_slice(&host.octets());
+            rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
+            rawaddr
+        }
+        Ok(IpAddr::V6(host)) => {
+            let mut rawaddr = vec![TYPE_IPV6];
+            rawaddr.extend_from_slice(&host.octets());
+            rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
+            rawaddr
+        }
+        _ => {
+            let dm_len = host.as_bytes().len();
+            let mut rawaddr = vec![TYPE_DOMAIN, dm_len as u8];
+            rawaddr.extend_from_slice(host.as_bytes());
+            rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
+            rawaddr
+        }
     }
-
-    if let Ok(host) = Ipv6Addr::from_str(host) {
-        let mut rawaddr = vec![TYPE_IPV6];
-        rawaddr.extend_from_slice(&host.octets());
-        rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-        return rawaddr;
-    }
-
-    let dm_len = host.as_bytes().len();
-    let mut rawaddr = vec![TYPE_DOMAIN, dm_len as u8];
-    rawaddr.extend_from_slice(host.as_bytes());
-    rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-    rawaddr
 }
