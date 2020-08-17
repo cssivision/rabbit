@@ -65,8 +65,8 @@ async fn proxy(
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
 
     let keepalive_period = config.keepalive_period;
-    socket1.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
-    socket2.set_keepalive(Some(Duration::new(keepalive_period, 0)))?;
+    socket1.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
+    socket2.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
 
     let (mut socket1_reader, mut socket1_writer) = socket1.split();
     let (mut socket2_reader, mut socket2_writer) = socket2.split();
