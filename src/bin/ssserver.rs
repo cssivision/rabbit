@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cipher = Cipher::new(&config.method, &config.password);
     awak::block_on(async {
-        let mut listener = TcpListener::bind(&config.server_addr).await?;
+        let listener = TcpListener::bind(&config.server_addr).await?;
         let config = Arc::new(config);
 
         loop {
