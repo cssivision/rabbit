@@ -4,11 +4,10 @@ use std::net::IpAddr;
 use crate::util::other;
 
 use c_ares_resolver::FutureResolver;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
-lazy_static! {
-    static ref GLOBAL_RESOLVER: FutureResolver = c_ares_resolver::FutureResolver::new().unwrap();
-}
+static GLOBAL_RESOLVER: Lazy<FutureResolver> =
+    Lazy::new(|| c_ares_resolver::FutureResolver::new().unwrap());
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     let results = GLOBAL_RESOLVER
@@ -19,8 +18,8 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     if let Some(result) = results.iter().next() {
         return result
             .to_string()
-            .parse()
-            .map_err(|e: std::net::AddrParseError| other(&e.to_string()));
+            .parse::<IpAddr>()
+            .map_err(|e| other(&e.to_string()));
     }
 
     Err(other("resolve fail"))
