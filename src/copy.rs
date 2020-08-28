@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use crate::cipher::Cipher;
 use crate::util::{eof, other};
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use awak::io::{AsyncRead, AsyncWrite};
 
 pub struct DecryptReadCopy<'a, R: ?Sized, W: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,

@@ -22,7 +22,7 @@ getopts = "0.2"
 openssl = "0.10"
 rand = "0.7"
 md5 = "0.3"
-tokio = { version = "0.2", features = ["full"] }
 futures = "0.3"
-lazy_static = "1.0"
-trust-dns-resolver = "0.19" 
+awak = { git = "https://github.com/cssivision/awak" }
+c-ares-resolver = "7.1"
+once_cell = "1.4"

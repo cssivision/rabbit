@@ -14,34 +14,36 @@ use shadowsocks::socks5::{
 };
 use shadowsocks::util::other;
 
+use awak::net::{TcpListener, TcpStream};
+use awak::time::timeout;
 use futures::future::try_join;
 use futures::FutureExt;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::time::timeout;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
 
-    let mut listener = TcpListener::bind(&config.local_addr).await?;
-    log::info!("Listening connections on {}", config.local_addr);
-    let cipher = Cipher::new(&config.method, &config.password);
-    let config = Arc::new(config);
+    awak::block_on(async {
+        let listener = TcpListener::bind(&config.local_addr).await?;
+        log::info!("Listening connections on {}", config.local_addr);
 
-    loop {
-        let (socket, _) = listener.accept().await?;
-        let cipher = Arc::new(Mutex::new(cipher.reset()));
+        let cipher = Cipher::new(&config.method, &config.password);
+        let config = Arc::new(config);
 
-        let proxy = proxy(config.clone(), cipher, socket).map(|r| {
-            if let Err(e) = r {
-                log::error!("failed to proxy; error={}", e);
-            }
-        });
+        loop {
+            let (socket, _) = listener.accept().await?;
+            let cipher = Arc::new(Mutex::new(cipher.reset()));
 
-        tokio::spawn(proxy);
-    }
+            let proxy = proxy(config.clone(), cipher, socket).map(|r| {
+                if let Err(e) = r {
+                    log::error!("failed to proxy; error={}", e);
+                }
+            });
+
+            awak::spawn(proxy);
+        }
+    })
 }
 
 async fn proxy(

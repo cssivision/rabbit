@@ -3,37 +3,24 @@ use std::net::IpAddr;
 
 use crate::util::other;
 
-use trust_dns_resolver::TokioAsyncResolver;
+use c_ares_resolver::FutureResolver;
+use once_cell::sync::Lazy;
 
-// pub async fn resolve(host: &str) -> io::Result<IpAddr> {
-//     let host = format!("{}:0", host);
-//     let ip = tokio::task::spawn_blocking(move || match host[..].to_socket_addrs() {
-//         Ok(it) => {
-//             let mut it = it.filter(|x| match x.ip() {
-//                 IpAddr::V4(_) => true,
-//                 IpAddr::V6(_) => false,
-//             });
-//             if let Some(addr) = it.next() {
-//                 Ok(addr.ip())
-//             } else {
-//                 Err(other("no ip return"))
-//             }
-//         }
-//         Err(e) => Err(e),
-//     })
-//     .await?;
-//     ip
-// }
+static GLOBAL_RESOLVER: Lazy<FutureResolver> =
+    Lazy::new(|| FutureResolver::new().expect("new FutureResolver error"));
 
-pub async fn resolve(resolver: TokioAsyncResolver, host: &str) -> io::Result<IpAddr> {
-    match resolver.lookup_ip(host).await {
-        Ok(r) => {
-            if let Some(addr) = r.iter().next() {
-                Ok(addr)
-            } else {
-                Err(other("no ip return"))
-            }
-        }
-        Err(e) => Err(other(&format!("resolve fail: {:?}", e))),
+pub async fn resolve(host: &str) -> io::Result<IpAddr> {
+    let results = GLOBAL_RESOLVER
+        .query_a(host)
+        .await
+        .map_err(|e| other(&e.to_string()))?;
+
+    if let Some(result) = results.iter().next() {
+        return result.ipv4().to_string().parse::<IpAddr>().map_err(|e| {
+            log::error!("parse ipv4 address err: {:?}", e);
+            other(&e.to_string())
+        });
     }
+
+    Err(other("resolve fail"))
 }

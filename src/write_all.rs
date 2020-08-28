@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use crate::cipher::Cipher;
 use crate::util::other;
 
-use tokio::io::AsyncWrite;
+use awak::io::AsyncWrite;
 
 pub struct EncryptWriteAll<'a, W: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,

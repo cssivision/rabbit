@@ -13,39 +13,32 @@ use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 
+use awak::net::{TcpListener, TcpStream};
 use futures::future::try_join;
 use futures::FutureExt;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::runtime::Runtime;
-use trust_dns_resolver::TokioAsyncResolver;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-
-    let mut rt = Runtime::new()?;
-    let resolver = rt
-        .block_on(TokioAsyncResolver::from_system_conf(rt.handle().clone()))
-        .expect("failed to create resolver");
 
     let config = parse_args("ssserver").expect("invalid config");
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
 
     let cipher = Cipher::new(&config.method, &config.password);
-    rt.block_on(async {
-        let mut listener = TcpListener::bind(&config.server_addr).await?;
+    awak::block_on(async {
+        let listener = TcpListener::bind(&config.server_addr).await?;
         let config = Arc::new(config);
 
         loop {
             let cipher = Arc::new(Mutex::new(cipher.reset()));
             let (socket, _) = listener.accept().await?;
 
-            let proxy = proxy(config.clone(), cipher, socket, resolver.clone()).map(|r| {
+            let proxy = proxy(config.clone(), cipher, socket).map(|r| {
                 if let Err(e) = r {
                     log::error!("failed to proxy; error={}", e);
                 }
             });
 
-            tokio::spawn(proxy);
+            awak::spawn(proxy);
         }
     })
 }
@@ -54,12 +47,11 @@ async fn proxy(
     config: Arc<Config>,
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
-    resolver: TokioAsyncResolver,
 ) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     log::info!("proxy to address: {}:{}", host, port);
 
-    let addr = resolve(resolver, &host).await?;
+    let addr = resolve(&host).await?;
     log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;

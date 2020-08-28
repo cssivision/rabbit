@@ -5,8 +5,8 @@ use std::str;
 
 use crate::util::other;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use awak::io::{AsyncReadExt, AsyncWriteExt};
+use awak::net::TcpStream;
 
 pub mod v5 {
     pub const VERSION: u8 = 5;
