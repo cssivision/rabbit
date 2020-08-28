@@ -25,4 +25,5 @@ md5 = "0.3"
 tokio = { version = "0.2", features = ["full"] }
 futures = "0.3"
 lazy_static = "1.0"
-awak = { path = "../awak" }
+awak = { git = "https://github.com/cssivision/awak" }
+c-ares-resolver = "7.1"
