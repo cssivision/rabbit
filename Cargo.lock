@@ -35,7 +35,7 @@ checksum = "f8aac770f1885fd7e387acedd76065302551364496e46b3dd00860b2f8359b9d"
 [[package]]
 name = "awak"
 version = "0.1.0"
-source = "git+https://github.com/cssivision/awak#2d49f12e8d68c70af3bb3cac822bfc47074f3b4e"
+source = "git+https://github.com/cssivision/awak#4629742daf0839984c68ad2d02537b868b7dac81"
 dependencies = [
  "async-task",
  "cfg-if",
