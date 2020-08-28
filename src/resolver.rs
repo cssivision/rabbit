@@ -7,7 +7,7 @@ use c_ares_resolver::FutureResolver;
 use once_cell::sync::Lazy;
 
 static GLOBAL_RESOLVER: Lazy<FutureResolver> =
-    Lazy::new(|| c_ares_resolver::FutureResolver::new().unwrap());
+    Lazy::new(|| FutureResolver::new().expect("new FutureResolver error"));
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     let results = GLOBAL_RESOLVER
@@ -16,10 +16,10 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
         .map_err(|e| other(&e.to_string()))?;
 
     if let Some(result) = results.iter().next() {
-        return result
-            .to_string()
-            .parse::<IpAddr>()
-            .map_err(|e| other(&e.to_string()));
+        return result.ipv4().to_string().parse::<IpAddr>().map_err(|e| {
+            log::error!("parse ipv4 address err: {:?}", e);
+            other(&e.to_string())
+        });
     }
 
     Err(other("resolve fail"))
