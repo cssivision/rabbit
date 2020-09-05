@@ -34,9 +34,9 @@ checksum = "f8aac770f1885fd7e387acedd76065302551364496e46b3dd00860b2f8359b9d"
 
 [[package]]
 name = "awak"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b908a7a7d8638ea45171a34a8cf43aa1eb6ff4a6af7545d5713f4c7f54af474"
+checksum = "31738f6753d2db34138554638af355b1384a16645f3801c50aae8a02df61c96d"
 dependencies = [
  "async-task",
  "cfg-if",
