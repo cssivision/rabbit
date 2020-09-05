@@ -16,10 +16,7 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
         .map_err(|e| other(&e.to_string()))?;
 
     if let Some(result) = results.iter().next() {
-        return result.ipv4().to_string().parse::<IpAddr>().map_err(|e| {
-            log::error!("parse ipv4 address err: {:?}", e);
-            other(&e.to_string())
-        });
+        return Ok(IpAddr::V4(result.ipv4()));
     }
 
     Err(other("resolve fail"))
