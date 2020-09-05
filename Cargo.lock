@@ -71,8 +71,9 @@ dependencies = [
 
 [[package]]
 name = "c-ares-resolver"
-version = "7.1.2"
-source = "git+https://github.com/dimbleby/c-ares-resolver?rev=352b438a#352b438a8993e500e1223bfb6456d77d1e88dab1"
+version = "7.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fec61ff3d2b90f3abc700497803c8d72d12406f82df601f357143d56c91d340c"
 dependencies = [
  "c-ares",
  "crossbeam-channel",
