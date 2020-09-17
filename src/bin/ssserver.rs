@@ -14,8 +14,8 @@ use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 
 use awak::net::{TcpListener, TcpStream};
-use futures::future::try_join;
-use futures::FutureExt;
+use futures_util::future::try_join;
+use futures_util::FutureExt;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();

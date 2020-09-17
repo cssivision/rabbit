@@ -16,8 +16,8 @@ use shadowsocks::util::other;
 
 use awak::net::{TcpListener, TcpStream};
 use awak::time::timeout;
-use futures::future::try_join;
-use futures::FutureExt;
+use futures_util::future::try_join;
+use futures_util::FutureExt;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
