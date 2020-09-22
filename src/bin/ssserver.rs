@@ -38,7 +38,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
 
-            awak::spawn(proxy);
+            let task = awak::spawn(proxy);
+            task.detach();
         }
     })
 }
