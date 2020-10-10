@@ -17,7 +17,7 @@ use awak::net::{TcpListener, TcpStream};
 use futures_util::future::try_join;
 use futures_util::FutureExt;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let config = parse_args("ssserver").expect("invalid config");

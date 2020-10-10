@@ -19,7 +19,7 @@ use awak::time::timeout;
 use futures_util::future::try_join;
 use futures_util::FutureExt;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
