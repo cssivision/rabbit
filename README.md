@@ -1,6 +1,5 @@
 # shadowsocks-rs
 
-[![Build Status](https://img.shields.io/travis/cssivision/shadowsocks-rs.svg?style=flat-square)](https://travis-ci.org/cssivision/shadowsocks-rs)
 [![Build](https://github.com/cssivision/shadowsocks-rs/workflows/build/badge.svg)](
 https://github.com/cssivision/shadowsocks-rs/actions)
 [![crate](https://img.shields.io/crates/v/shadowsocks-rs.svg)](https://crates.io/crates/shadowsocks-rs)
