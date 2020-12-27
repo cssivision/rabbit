@@ -770,6 +770,7 @@ dependencies = [
  "md5",
  "once_cell",
  "openssl",
+ "parking_lot",
  "rand 0.8.0",
  "serde",
  "serde_derive",

@@ -1,13 +1,14 @@
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 use crate::util::other;
 
 use awak::io::AsyncWrite;
+use parking_lot::Mutex;
 
 pub struct EncryptWriteAll<'a, W: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,
@@ -38,7 +39,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock().unwrap();
+        let mut cipher = me.cipher.lock();
         let mut data = if cipher.enc.is_none() {
             cipher.init_encrypt();
             cipher.iv.clone()

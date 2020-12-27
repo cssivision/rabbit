@@ -1,13 +1,14 @@
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 use crate::util::{eof, other};
 
 use awak::io::{AsyncRead, AsyncWrite};
+use parking_lot::Mutex;
 
 pub struct DecryptReadCopy<'a, R: ?Sized, W: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,
@@ -50,7 +51,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock().unwrap();
+        let mut cipher = me.cipher.lock();
         if cipher.dec.is_none() {
             let mut iv = vec![0u8; cipher.iv_len];
             while me.pos < iv.len() {
@@ -150,7 +151,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock().unwrap();
+        let mut cipher = me.cipher.lock();
         if cipher.enc.is_none() {
             cipher.init_encrypt();
             me.pos = 0;

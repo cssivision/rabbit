@@ -1,7 +1,7 @@
 use std::io::Error;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use shadowsocks::args::parse_args;
@@ -18,6 +18,7 @@ use awak::net::{TcpListener, TcpStream};
 use awak::time::timeout;
 use futures_util::future::try_join;
 use futures_util::FutureExt;
+use parking_lot::Mutex;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
