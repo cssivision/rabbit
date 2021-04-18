@@ -1,5 +1,6 @@
 use std::io;
 use std::net::IpAddr;
+use std::str::FromStr;
 
 use crate::util::other;
 
@@ -10,6 +11,10 @@ static GLOBAL_RESOLVER: Lazy<FutureResolver> =
     Lazy::new(|| FutureResolver::new().expect("new FutureResolver error"));
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
+    if let Ok(addr) = IpAddr::from_str(host) {
+        return Ok(addr);
+    }
+
     let results = GLOBAL_RESOLVER
         .query_a(host)
         .await
