@@ -56,9 +56,13 @@ impl Cipher {
 
     pub fn init_decrypt(&mut self, iv: &[u8]) {
         self.dec = if self.key_len == 16 {
-            Some(Box::new(Aes128Cfb::new_var(&self.key, iv).unwrap()))
+            Some(Box::new(
+                Aes128Cfb::new_var(&self.key, iv).expect("init dec error"),
+            ))
         } else {
-            Some(Box::new(Aes256Cfb::new_var(&self.key, iv).unwrap()))
+            Some(Box::new(
+                Aes256Cfb::new_var(&self.key, iv).expect("init dec error"),
+            ))
         };
     }
 
