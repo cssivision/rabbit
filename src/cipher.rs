@@ -1,13 +1,18 @@
 use crate::util::generate_key;
-use aes::{Aes128, Aes256};
+
+use aes::{Aes128, Aes192, Aes256};
 use cfb_mode::cipher::{NewStreamCipher, StreamCipher};
 use cfb_mode::Cfb;
-
+use ctr::Ctr128;
 use rand::distributions::Standard;
 use rand::{thread_rng, Rng};
 
 type Aes128Cfb = Cfb<Aes128>;
+type Aes192Cfb = Cfb<Aes192>;
 type Aes256Cfb = Cfb<Aes256>;
+type Aes128Ctr = Ctr128<Aes128>;
+type Aes192Ctr = Ctr128<Aes192>;
+type Aes256Ctr = Ctr128<Aes256>;
 
 pub struct Cipher {
     pub key: Vec<u8>,
@@ -22,14 +27,22 @@ pub struct Cipher {
 #[derive(Clone, Copy, Debug)]
 enum CipherMethod {
     Aes128Cfb,
+    Aes192Cfb,
     Aes256Cfb,
+    Aes128Ctr,
+    Aes192Ctr,
+    Aes256Ctr,
 }
 
 impl Cipher {
     pub fn new(method: &str, password: &str) -> Cipher {
         let (key_len, cipher_method) = match method {
-            "aes-256-cfb" => (32, CipherMethod::Aes256Cfb),
             "aes-128-cfb" => (16, CipherMethod::Aes128Cfb),
+            "aes-192-cfb" => (24, CipherMethod::Aes192Cfb),
+            "aes-256-cfb" => (32, CipherMethod::Aes256Cfb),
+            "aes-128-ctr" => (16, CipherMethod::Aes128Ctr),
+            "aes-192-ctr" => (24, CipherMethod::Aes192Ctr),
+            "aes-256-ctr" => (32, CipherMethod::Aes256Ctr),
             _ => panic!("method not supported"),
         };
 
@@ -56,11 +69,23 @@ impl Cipher {
 
     fn new_cipher(&self, iv: &[u8]) -> Box<dyn StreamCipher + Send + 'static> {
         match self.cipher_method {
+            CipherMethod::Aes128Cfb => {
+                Box::new(Aes128Cfb::new_var(&self.key, iv).expect("init cipher error"))
+            }
+            CipherMethod::Aes192Cfb => {
+                Box::new(Aes192Cfb::new_var(&self.key, iv).expect("init cipher error"))
+            }
             CipherMethod::Aes256Cfb => {
                 Box::new(Aes256Cfb::new_var(&self.key, iv).expect("init cipher error"))
             }
-            CipherMethod::Aes128Cfb => {
-                Box::new(Aes128Cfb::new_var(&self.key, iv).expect("init cipher error"))
+            CipherMethod::Aes128Ctr => {
+                Box::new(Aes128Ctr::new_var(&self.key, iv).expect("init cipher error"))
+            }
+            CipherMethod::Aes192Ctr => {
+                Box::new(Aes192Ctr::new_var(&self.key, iv).expect("init cipher error"))
+            }
+            CipherMethod::Aes256Ctr => {
+                Box::new(Aes256Ctr::new_var(&self.key, iv).expect("init cipher error"))
             }
         }
     }
