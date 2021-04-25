@@ -16,13 +16,20 @@ pub struct Cipher {
     pub iv_len: usize,
     pub enc: Option<Box<dyn StreamCipher + Send + 'static>>,
     pub dec: Option<Box<dyn StreamCipher + Send + 'static>>,
+    cipher_method: CipherMethod,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CipherMethod {
+    Aes128Cfb,
+    Aes256Cfb,
 }
 
 impl Cipher {
     pub fn new(method: &str, password: &str) -> Cipher {
-        let key_len = match method {
-            "aes-256-cfb" => 32,
-            "aes-128-cfb" => 16,
+        let (key_len, cipher_method) = match method {
+            "aes-256-cfb" => (32, CipherMethod::Aes256Cfb),
+            "aes-128-cfb" => (16, CipherMethod::Aes128Cfb),
             _ => panic!("method not supported"),
         };
 
@@ -35,6 +42,7 @@ impl Cipher {
             iv: vec![0u8; iv_len],
             enc: None,
             dec: None,
+            cipher_method,
         }
     }
 
@@ -43,27 +51,22 @@ impl Cipher {
             let rng = thread_rng();
             self.iv = rng.sample_iter(&Standard).take(self.iv.len()).collect();
         }
-        self.enc = if self.key_len == 16 {
-            Some(Box::new(
-                Aes128Cfb::new_var(&self.key, &self.iv).expect("init enc error"),
-            ))
-        } else {
-            Some(Box::new(
-                Aes256Cfb::new_var(&self.key, &self.iv).expect("init enc error"),
-            ))
-        };
+        self.enc = Some(self.new_cipher(&self.iv));
+    }
+
+    fn new_cipher(&self, iv: &[u8]) -> Box<dyn StreamCipher + Send + 'static> {
+        match self.cipher_method {
+            CipherMethod::Aes256Cfb => {
+                Box::new(Aes256Cfb::new_var(&self.key, iv).expect("init cipher error"))
+            }
+            CipherMethod::Aes128Cfb => {
+                Box::new(Aes128Cfb::new_var(&self.key, iv).expect("init cipher error"))
+            }
+        }
     }
 
     pub fn init_decrypt(&mut self, iv: &[u8]) {
-        self.dec = if self.key_len == 16 {
-            Some(Box::new(
-                Aes128Cfb::new_var(&self.key, iv).expect("init dec error"),
-            ))
-        } else {
-            Some(Box::new(
-                Aes256Cfb::new_var(&self.key, iv).expect("init dec error"),
-            ))
-        };
+        self.dec = Some(self.new_cipher(iv));
     }
 
     pub fn encrypt(&mut self, input: &mut [u8]) {
@@ -86,6 +89,7 @@ impl Cipher {
             iv_len: self.iv_len,
             enc: None,
             dec: None,
+            cipher_method: self.cipher_method,
         }
     }
 }
