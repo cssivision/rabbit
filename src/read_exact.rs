@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
-use crate::util::{eof, other};
+use crate::util::eof;
 
 use awak::io::AsyncRead;
 use parking_lot::Mutex;
@@ -66,13 +66,8 @@ where
             }
         }
 
-        let plain_data = match cipher.decrypt(&me.buf[..me.buf.len()]) {
-            Some(b) => b,
-            None => return Err(other("decrypt error")).into(),
-        };
-
         let copy_len = me.buf.len();
-        me.buf[..copy_len].copy_from_slice(&plain_data[..copy_len]);
+        cipher.decrypt(&mut me.buf[..copy_len]);
         Poll::Ready(Ok(me.pos))
     }
 }

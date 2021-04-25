@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
-use crate::util::other;
 
 use awak::io::AsyncWrite;
 use parking_lot::Mutex;
@@ -47,15 +46,11 @@ where
             vec![]
         };
 
-        let cipher_buf = match cipher.encrypt(&me.buf) {
-            Some(b) => Vec::from(&b[..me.buf.len()]),
-            None => {
-                log::error!("encrypt error");
-                return Err(other("encrypt error!")).into();
-            }
-        };
-
-        data.extend_from_slice(&cipher_buf);
+        data.extend_from_slice(&me.buf);
+        let data_len = data.len();
+        if data_len > me.buf.len() {
+            cipher.encrypt(&mut data[data_len - me.buf.len()..]);
+        }
 
         while !data.is_empty() {
             let n = ready!(Pin::new(&mut me.writer).poll_write(cx, &data))?;
