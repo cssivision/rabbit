@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
-use crate::util::{eof, other};
+use crate::util::eof;
 
 use awak::io::{AsyncRead, AsyncWrite};
 use parking_lot::Mutex;
@@ -75,12 +75,8 @@ where
                 if n == 0 {
                     me.read_done = true;
                 } else {
-                    let plain_data = match cipher.decrypt(&me.buf[..n]) {
-                        Some(b) => b,
-                        None => return Err(other("decrypt error")).into(),
-                    };
+                    cipher.decrypt(&mut me.buf[..n]);
 
-                    me.buf[..n].copy_from_slice(&plain_data[..n]);
                     me.pos = 0;
                     me.cap = n;
                 }
@@ -168,12 +164,7 @@ where
                 if n == 0 {
                     me.read_done = true;
                 } else {
-                    let cipher_data = match cipher.encrypt(&me.buf[..n]) {
-                        Some(b) => b,
-                        None => return Err(other("encrypt error")).into(),
-                    };
-
-                    me.buf[..n].copy_from_slice(&cipher_data[..n]);
+                    cipher.encrypt(&mut me.buf[..n]);
 
                     me.pos = 0;
                     me.cap = n;
