@@ -30,9 +30,9 @@ fn main() -> anyhow::Result<()> {
         let config = Arc::new(config);
 
         loop {
+            let (socket, addr) = listener.accept().await?;
+            log::debug!("accept stream from addr {:?}", addr);
             let cipher = Arc::new(Mutex::new(cipher.reset()));
-            let (socket, _) = listener.accept().await?;
-
             let proxy = proxy(config.clone(), cipher, socket).map(|r| {
                 if let Err(e) = r {
                     log::error!("failed to proxy; error={}", e);
@@ -51,12 +51,13 @@ async fn proxy(
     mut socket1: TcpStream,
 ) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
-    log::info!("proxy to address: {}:{}", host, port);
+    log::debug!("proxy to address: {}:{}", host, port);
 
     let addr = resolve(&host).await?;
     log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
+    log::debug!("connected to addr {}:{}", addr, port);
 
     let keepalive_period = config.keepalive_period;
     socket1.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
@@ -64,6 +65,8 @@ async fn proxy(
 
     let (mut socket1_reader, mut socket1_writer) = socket1.split();
     let (mut socket2_reader, mut socket2_writer) = socket2.split();
+
+    log::debug!("transport data between local and remote...");
     let half1 = decrypt_copy(cipher.clone(), &mut socket1_reader, &mut socket2_writer);
     let half2 = encrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
 

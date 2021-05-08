@@ -27,23 +27,21 @@ fn main() -> anyhow::Result<()> {
 
     awak::block_on(async {
         let listener = TcpListener::bind(&config.local_addr).await?;
-        log::info!("Listening connections on {}", config.local_addr);
+        log::info!("listening connections on {}", config.local_addr);
 
         let cipher = Cipher::new(&config.method, &config.password);
         let config = Arc::new(config);
 
         loop {
-            let (socket, _) = listener.accept().await?;
+            let (socket, addr) = listener.accept().await?;
+            log::debug!("accept tcp stream from addr {:?}", addr);
             let cipher = Arc::new(Mutex::new(cipher.reset()));
-
             let proxy = proxy(config.clone(), cipher, socket).map(|r| {
                 if let Err(e) = r {
                     log::error!("failed to proxy; error={}", e);
                 }
             });
-
-            let task = awak::spawn(proxy);
-            task.detach();
+            awak::spawn(proxy).detach();
         }
     })
 }
@@ -58,9 +56,11 @@ async fn proxy(
         return Err(other("socks5 handshake timout"));
     }
     let (host, port) = socks5_serve.unwrap();
-    log::info!("proxy to address: {}:{}", host, port);
+    log::debug!("proxy to address: {}:{}", host, port);
 
     let mut socket2 = TcpStream::connect(&config.server_addr).await?;
+    log::debug!("connected to server {}", config.server_addr);
+
     let rawaddr = generate_raw_addr(&host, port);
     write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
 
@@ -70,6 +70,8 @@ async fn proxy(
 
     let (mut socket1_reader, mut socket1_writer) = socket1.split();
     let (mut socket2_reader, mut socket2_writer) = socket2.split();
+
+    log::debug!("transport data between local and remote...");
     let half1 = encrypt_copy(cipher.clone(), &mut socket1_reader, &mut socket2_writer);
     let half2 = decrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
 
