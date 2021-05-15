@@ -37,21 +37,17 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
     conn.write_all(buf3).await?;
 
     // check version
-    let version = &mut [0u8];
-    conn.read_exact(version).await?;
-    if version[0] != v5::VERSION {
+    let buf4 = &mut [0u8; 3];
+    conn.read_exact(buf4).await?;
+    if buf4[0] != v5::VERSION {
         return Err(other("didn't confirm with v5 version"));
     }
-
     // checkout cmd
-    let cmd = &mut [0u8];
-    conn.read_exact(cmd).await?;
-    if cmd[0] != v5::CMD_CONNECT {
+    if buf4[1] != v5::CMD_CONNECT {
         return Err(other("unsupported command"));
     }
-
     // there's one byte which is reserved for future use, so we read it and discard it.
-    conn.read_exact(&mut [0u8]).await?;
+
     let address_type = &mut [0u8];
     conn.read_exact(address_type).await?;
 
@@ -63,6 +59,11 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             conn.read_exact(buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
+
+            let mut resp = vec![v5::VERSION, 0x00, 0x00, v5::TYPE_IPV4];
+            resp.extend_from_slice(buf);
+            conn.write_all(&resp).await?;
+
             Ok((format!("{}", addr), port))
         }
 
@@ -81,6 +82,11 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
+
+            let mut resp = vec![v5::VERSION, 0x00, 0x00, v5::TYPE_IPV6];
+            resp.extend_from_slice(buf);
+            conn.write_all(&resp).await?;
+
             Ok((format!("{}", addr), port))
         }
 
@@ -101,6 +107,12 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
 
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
+
+            let mut resp = vec![v5::VERSION, 0x00, 0x00, v5::TYPE_DOMAIN];
+            resp.extend_from_slice(buf1);
+            resp.extend_from_slice(buf2);
+            conn.write_all(&resp).await?;
+
             Ok((hostname.to_string(), port))
         }
         n => {
@@ -112,8 +124,8 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
     // Sending connection established message immediately to client.
     // This some round trip time for creating socks connection with the client.
     // But if connection failed, the client will get connection reset error.
-    let resp = &[0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43];
-    conn.write_all(resp).await?;
+    // let resp = &[0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43];
+    // conn.write_all(resp).await?;
 
     result
 }
