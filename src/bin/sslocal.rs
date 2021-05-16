@@ -51,7 +51,7 @@ async fn proxy(
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
 ) -> Result<(u64, u64), Error> {
-    let socks5_serve = timeout(Duration::from_secs(1), socks5::serve(&mut socket1)).await?;
+    let socks5_serve = timeout(Duration::from_secs(3), socks5::handshake(&mut socket1)).await?;
     if socks5_serve.is_err() {
         return Err(other("socks5 handshake timout"));
     }

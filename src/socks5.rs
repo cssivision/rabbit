@@ -21,7 +21,7 @@ pub mod v5 {
 ///
 /// if success The returned future will the handled `TcpStream` and address. if handle shake fail will
 /// return `io::Error`.
-pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
+pub async fn handshake(conn: &mut TcpStream) -> io::Result<(String, u16)> {
     // socks version, only support version 5.
     let buf1 = &mut [0u8; 2];
     conn.read_exact(buf1).await?;
@@ -50,6 +50,10 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
 
     let address_type = &mut [0u8];
     conn.read_exact(address_type).await?;
+
+    // Sending connection established message immediately to client.
+    // This some round trip time for creating socks connection with the client.
+    // But if connection failed, the client will get connection reset error.
 
     let result = match address_type.get(0) {
         // For IPv4 addresses, we read the 4 bytes for the address as
@@ -120,12 +124,6 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             Err(other(&msg))
         }
     };
-
-    // Sending connection established message immediately to client.
-    // This some round trip time for creating socks connection with the client.
-    // But if connection failed, the client will get connection reset error.
-    // let resp = &[0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43];
-    // conn.write_all(resp).await?;
 
     result
 }
