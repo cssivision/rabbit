@@ -30,7 +30,7 @@ pub async fn serve(conn: &mut TcpStream) -> io::Result<(String, u16)> {
         return Err(other("unknown version"));
     }
 
-    let buf2 = &mut [0u8, buf1[1] as u8];
+    let buf2 = &mut vec![0u8; buf1[1] as usize];
     conn.read_exact(buf2).await?;
 
     let buf3 = &mut [v5::VERSION, v5::METH_NO_AUTH];
