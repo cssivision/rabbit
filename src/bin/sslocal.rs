@@ -12,10 +12,8 @@ use shadowsocks::socks5::{
     self,
     v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
 };
-use shadowsocks::util::other;
 
 use awak::net::{TcpListener, TcpStream};
-use awak::time::timeout;
 use futures_util::future::try_join;
 use futures_util::FutureExt;
 use parking_lot::Mutex;
@@ -51,11 +49,8 @@ async fn proxy(
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
 ) -> Result<(u64, u64), Error> {
-    let socks5_serve = timeout(Duration::from_secs(3), socks5::handshake(&mut socket1)).await?;
-    if socks5_serve.is_err() {
-        return Err(other("socks5 handshake timout"));
-    }
-    let (host, port) = socks5_serve.unwrap();
+    let (host, port) = socks5::server::handshake(&mut socket1, Duration::from_secs(3)).await?;
+
     log::debug!("proxy to address: {}:{}", host, port);
 
     let mut socket2 = TcpStream::connect(&config.server_addr).await?;
