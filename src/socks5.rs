@@ -17,6 +17,7 @@ pub mod v5 {
     pub const TYPE_IPV4: u8 = 1;
     pub const TYPE_IPV6: u8 = 4;
     pub const TYPE_DOMAIN: u8 = 3;
+    pub const REPLY_SUCESS: u8 = 0;
 }
 
 /// Creates a future which will handle socks5 connection.
@@ -70,7 +71,7 @@ async fn handshake_inner(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
 
-            let mut resp = vec![v5::VERSION, 0x00, 0x00, v5::TYPE_IPV4];
+            let mut resp = vec![v5::VERSION, v5::REPLY_SUCESS, 0x00, v5::TYPE_IPV4];
             resp.extend_from_slice(buf);
             conn.write_all(&resp).await?;
 
@@ -93,7 +94,7 @@ async fn handshake_inner(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
 
-            let mut resp = vec![v5::VERSION, 0x00, 0x00, v5::TYPE_IPV6];
+            let mut resp = vec![v5::VERSION, v5::REPLY_SUCESS, 0x00, v5::TYPE_IPV6];
             resp.extend_from_slice(buf);
             conn.write_all(&resp).await?;
 
@@ -118,7 +119,7 @@ async fn handshake_inner(conn: &mut TcpStream) -> io::Result<(String, u16)> {
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
 
-            let mut resp = vec![v5::VERSION, 0x00, 0x00, v5::TYPE_DOMAIN];
+            let mut resp = vec![v5::VERSION, v5::REPLY_SUCESS, 0x00, v5::TYPE_DOMAIN];
             resp.extend_from_slice(buf1);
             resp.extend_from_slice(buf2);
             conn.write_all(&resp).await?;
