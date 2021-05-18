@@ -49,7 +49,7 @@ async fn proxy(
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
 ) -> Result<(u64, u64), Error> {
-    let (host, port) = socks5::server::handshake(&mut socket1, Duration::from_secs(3)).await?;
+    let (host, port) = socks5::handshake(&mut socket1, Duration::from_secs(3)).await?;
 
     log::debug!("proxy to address: {}:{}", host, port);
 
