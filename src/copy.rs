@@ -38,10 +38,13 @@ where
     type Output = io::Result<(u64, u64)>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let a_to_b = self.transfer_one_direction(cx, Direction::Encrypt)?;
+        let b_to_a = self.transfer_one_direction(cx, Direction::Decrypt)?;
+
         // It is not a problem if ready! returns early because transfer_one_direction for the
         // other direction will keep returning TransferState::Done(count) in future calls to poll
-        let a_to_b = ready!(self.transfer_one_direction(cx, Direction::Encrypt))?;
-        let b_to_a = ready!(self.transfer_one_direction(cx, Direction::Decrypt))?;
+        let a_to_b = ready!(a_to_b);
+        let b_to_a = ready!(b_to_a);
 
         Poll::Ready(Ok((a_to_b, b_to_a)))
     }
@@ -61,7 +64,7 @@ enum TransferState {
     ShuttingDown(u64),
     Done(u64),
 }
-
+#[derive(Debug)]
 enum Direction {
     Encrypt,
     Decrypt,
@@ -92,10 +95,14 @@ where
                             Pin::new(&mut self.decrypt_reader).poll_decrypt(cx, self.b, self.a)
                         )?,
                     };
+
                     *state = TransferState::ShuttingDown(count);
                 }
                 TransferState::ShuttingDown(count) => {
-                    ready!(Pin::new(&mut self.b).poll_close(cx))?;
+                    match direction {
+                        Direction::Encrypt => ready!(Pin::new(&mut self.b).poll_close(cx))?,
+                        Direction::Decrypt => ready!(Pin::new(&mut self.a).poll_close(cx))?,
+                    };
 
                     *state = TransferState::Done(*count);
                 }

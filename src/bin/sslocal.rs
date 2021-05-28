@@ -63,7 +63,7 @@ async fn proxy(
     socket1.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
     socket2.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
 
-    let (n1, n2) = copy_bidirectional(&mut socket1, &mut socket2, cipher.clone()).await?;
+    let (n1, n2) = copy_bidirectional(&mut socket1, &mut socket2, cipher).await?;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
     Ok((n1, n2))
 }
