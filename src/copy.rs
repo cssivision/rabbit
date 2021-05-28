@@ -105,6 +105,15 @@ where
     }
 }
 
+struct CipherCopy {
+    cipher: Arc<Mutex<Cipher>>,
+    read_done: bool,
+    pos: usize,
+    cap: usize,
+    amt: u64,
+    buf: Box<[u8]>,
+}
+
 impl CipherCopy {
     fn new(cipher: Arc<Mutex<Cipher>>) -> CipherCopy {
         CipherCopy {
@@ -116,9 +125,7 @@ impl CipherCopy {
             buf: Box::new([0; 1024 * 64]),
         }
     }
-}
 
-impl CipherCopy {
     fn poll_decrypt<'a, R, W>(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
@@ -183,18 +190,7 @@ impl CipherCopy {
             }
         }
     }
-}
 
-struct CipherCopy {
-    cipher: Arc<Mutex<Cipher>>,
-    read_done: bool,
-    pos: usize,
-    cap: usize,
-    amt: u64,
-    buf: Box<[u8]>,
-}
-
-impl CipherCopy {
     fn poll_encrypt<'a, R, W>(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
