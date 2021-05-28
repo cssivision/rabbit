@@ -57,6 +57,7 @@ async fn proxy(
     log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
+    let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
     let keepalive_period = config.keepalive_period;

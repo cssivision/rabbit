@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
 
         loop {
             let (socket, addr) = listener.accept().await?;
+            let _ = socket.set_nodelay(true);
             log::debug!("accept tcp stream from addr {:?}", addr);
             let cipher = Arc::new(Mutex::new(cipher.reset()));
             let proxy = proxy(config.clone(), cipher, socket).map(|r| {
