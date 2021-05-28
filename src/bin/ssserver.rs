@@ -8,13 +8,12 @@ use std::time::Duration;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::config::Config;
-use shadowsocks::io::{decrypt_copy, encrypt_copy, read_exact};
+use shadowsocks::io::{copy_bidirectional, read_exact};
 use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 
 use awak::net::{TcpListener, TcpStream};
-use futures_util::future::{select, Either};
 use futures_util::FutureExt;
 use parking_lot::Mutex;
 
@@ -64,25 +63,7 @@ async fn proxy(
     socket1.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
     socket2.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
 
-    let (mut socket1_reader, mut socket1_writer) = socket1.split();
-    let (mut socket2_reader, mut socket2_writer) = socket2.split();
-
-    log::debug!("transport data between local and remote...");
-    let half1 = decrypt_copy(cipher.clone(), &mut socket1_reader, &mut socket2_writer);
-    let half2 = encrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
-
-    let (n1, n2) = match select(half1, half2).await {
-        Either::Left((n, half2)) => {
-            let n1 = n?;
-            let n2 = half2.amt();
-            (n1, n2)
-        }
-        Either::Right((n, half1)) => {
-            let n2 = n?;
-            let n1 = half1.amt();
-            (n1, n2)
-        }
-    };
+    let (n1, n2) = copy_bidirectional(&mut socket2, &mut socket1, cipher.clone()).await?;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
