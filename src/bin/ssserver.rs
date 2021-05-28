@@ -14,7 +14,7 @@ use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 
 use awak::net::{TcpListener, TcpStream};
-use futures_util::future::try_join;
+use futures_util::future::{select, Either};
 use futures_util::FutureExt;
 use parking_lot::Mutex;
 
@@ -70,7 +70,18 @@ async fn proxy(
     let half1 = decrypt_copy(cipher.clone(), &mut socket1_reader, &mut socket2_writer);
     let half2 = encrypt_copy(cipher.clone(), &mut socket2_reader, &mut socket1_writer);
 
-    let (n1, n2) = try_join(half1, half2).await?;
+    let (n1, n2) = match select(half1, half2).await {
+        Either::Left((n, half2)) => {
+            let n1 = n?;
+            let n2 = half2.amt();
+            (n1, n2)
+        }
+        Either::Right((n, half1)) => {
+            let n2 = n?;
+            let n1 = half1.amt();
+            (n1, n2)
+        }
+    };
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }

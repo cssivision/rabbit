@@ -21,6 +21,12 @@ pub struct DecryptReadCopy<'a, R: ?Sized, W: ?Sized> {
     buf: Box<[u8]>,
 }
 
+impl<'a, R: ?Sized, W: ?Sized> DecryptReadCopy<'a, R, W> {
+    pub fn amt(&self) -> u64 {
+        self.amt
+    }
+}
+
 pub fn decrypt_copy<'a, R, W>(
     cipher: Arc<Mutex<Cipher>>,
     reader: &'a mut R,
@@ -115,6 +121,12 @@ pub struct EncryptWriteCopy<'a, R: ?Sized, W: ?Sized> {
     cap: usize,
     amt: u64,
     buf: Box<[u8]>,
+}
+
+impl<'a, R: ?Sized, W: ?Sized> EncryptWriteCopy<'a, R, W> {
+    pub fn amt(&self) -> u64 {
+        self.amt
+    }
 }
 
 pub fn encrypt_copy<'a, R, W>(
