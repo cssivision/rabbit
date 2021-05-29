@@ -14,7 +14,7 @@ pub async fn copy_bidirectional<A, B>(
     a: &mut A,
     b: &mut B,
     cipher: Arc<Mutex<Cipher>>,
-) -> Result<(u64, u64), std::io::Error>
+) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
     B: AsyncRead + AsyncWrite + Unpin + ?Sized,
@@ -24,8 +24,8 @@ where
         b,
         a_to_b: TransferState::Running,
         b_to_a: TransferState::Running,
-        decrypt_reader: CipherCopy::new(cipher.clone()),
-        encrypt_writer: CipherCopy::new(cipher),
+        decrypter: CopyBuffer::new(cipher.clone()),
+        encrypter: CopyBuffer::new(cipher),
     }
     .await
 }
@@ -55,8 +55,8 @@ struct CopyBidirectional<'a, A: ?Sized, B: ?Sized> {
     b: &'a mut B,
     a_to_b: TransferState,
     b_to_a: TransferState,
-    decrypt_reader: CipherCopy,
-    encrypt_writer: CipherCopy,
+    decrypter: CopyBuffer,
+    encrypter: CopyBuffer,
 }
 
 enum TransferState {
@@ -88,12 +88,12 @@ where
             match state {
                 TransferState::Running => {
                     let count = match direction {
-                        Direction::Encrypt => ready!(
-                            Pin::new(&mut self.encrypt_writer).poll_encrypt(cx, self.a, self.b)
-                        )?,
-                        Direction::Decrypt => ready!(
-                            Pin::new(&mut self.decrypt_reader).poll_decrypt(cx, self.b, self.a)
-                        )?,
+                        Direction::Encrypt => {
+                            ready!(Pin::new(&mut self.encrypter).poll_encrypt(cx, self.a, self.b))?
+                        }
+                        Direction::Decrypt => {
+                            ready!(Pin::new(&mut self.decrypter).poll_decrypt(cx, self.b, self.a))?
+                        }
                     };
 
                     *state = TransferState::ShuttingDown(count);
@@ -112,7 +112,7 @@ where
     }
 }
 
-struct CipherCopy {
+struct CopyBuffer {
     cipher: Arc<Mutex<Cipher>>,
     read_done: bool,
     pos: usize,
@@ -121,9 +121,9 @@ struct CipherCopy {
     buf: Box<[u8]>,
 }
 
-impl CipherCopy {
-    fn new(cipher: Arc<Mutex<Cipher>>) -> CipherCopy {
-        CipherCopy {
+impl CopyBuffer {
+    fn new(cipher: Arc<Mutex<Cipher>>) -> CopyBuffer {
+        CopyBuffer {
             cipher,
             read_done: false,
             amt: 0,
