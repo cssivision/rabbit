@@ -53,26 +53,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
-name = "awak"
-version = "0.2.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11d1f7e7c4457b472acef34dbd386957c9f455cb5baa45c02ff7186c7ac98a47"
-dependencies = [
- "async-task",
- "cfg-if 0.1.10",
- "concurrent-queue",
- "futures-util",
- "libc",
- "num_cpus",
- "once_cell",
- "parking_lot",
- "pin-project-lite",
- "rand",
- "slab",
- "socket2",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -374,6 +354,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-uring"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb82832e05cc4ca298f198a8db108837b4f7b7b1248e3cba8e48f151aece80cf"
+dependencies = [
+ "bitflags",
+ "libc",
+]
+
+[[package]]
 name = "itertools"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -445,16 +435,6 @@ dependencies = [
  "error-chain",
  "pkg-config",
  "toml",
-]
-
-[[package]]
-name = "num_cpus"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05499f3756671c15885fee9034446956fff3f243d6077b91e5767df161f766b3"
-dependencies = [
- "hermit-abi",
- "libc",
 ]
 
 [[package]]
@@ -632,6 +612,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 
 [[package]]
+name = "scoped-tls"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea6a9290e3c9cf0f18145ef7ffa62d68ee0bf5fcd651017e586dc7fd5da448c2"
+
+[[package]]
 name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -671,7 +657,6 @@ version = "0.8.3"
 dependencies = [
  "aes",
  "anyhow",
- "awak",
  "c-ares-resolver",
  "cfb-mode",
  "chacha20",
@@ -688,6 +673,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "slings",
 ]
 
 [[package]]
@@ -697,20 +683,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
+name = "slings"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a923c3e8a661c913dae2521fde297a33a324a3e4e58d7ece92974812d791d91"
+dependencies = [
+ "async-task",
+ "concurrent-queue",
+ "futures-util",
+ "io-uring",
+ "libc",
+ "parking_lot",
+ "pin-project-lite",
+ "scoped-tls",
+ "slab",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
-
-[[package]]
-name = "socket2"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e3dfc207c526015c632472a77be09cf1b6e46866581aecae5cc38fb4235dea2"
-dependencies = [
- "libc",
- "winapi",
-]
 
 [[package]]
 name = "syn"

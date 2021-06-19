@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use crate::util::other;
 
-use awak::io::{AsyncReadExt, AsyncWriteExt};
-use awak::net::TcpStream;
-use awak::time::timeout;
+use slings::net::TcpStream;
+use slings::time::timeout;
+use slings::{AsyncReadExt, AsyncWriteExt};
 
 pub mod v5 {
     pub const VERSION: u8 = 5;

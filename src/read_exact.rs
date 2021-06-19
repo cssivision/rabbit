@@ -7,8 +7,8 @@ use std::task::{Context, Poll};
 use crate::cipher::Cipher;
 use crate::util::eof;
 
-use awak::io::AsyncRead;
 use parking_lot::Mutex;
+use slings::AsyncRead;
 
 pub struct DecryptReadExact<'a, A: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,

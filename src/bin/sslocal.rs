@@ -13,16 +13,18 @@ use shadowsocks::socks5::{
     v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
 };
 
-use awak::net::{TcpListener, TcpStream};
 use futures_util::FutureExt;
 use parking_lot::Mutex;
+use slings::net::{TcpListener, TcpStream};
+use slings::runtime::Runtime;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
+    let runtime = Runtime::new()?;
 
-    awak::block_on(async {
+    runtime.block_on(async {
         let listener = TcpListener::bind(&config.local_addr).await?;
         log::info!("listening connections on {}", config.local_addr);
 
@@ -39,7 +41,7 @@ fn main() -> anyhow::Result<()> {
                     log::error!("failed to proxy; error={}", e);
                 }
             });
-            awak::spawn(proxy).detach();
+            slings::spawn_local(proxy).detach();
         }
     })
 }

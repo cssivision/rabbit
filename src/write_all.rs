@@ -6,8 +6,8 @@ use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 
-use awak::io::AsyncWrite;
 use parking_lot::Mutex;
+use slings::AsyncWrite;
 
 pub struct EncryptWriteAll<'a, W: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,
