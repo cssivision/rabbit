@@ -9,7 +9,6 @@ static SERVER_ADDR: &str = "0.0.0.0:9006";
 static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
 static TIMEOUT: u64 = 100;
-static KEEPALIVE_PEARID: u64 = 600;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(default)]
@@ -19,7 +18,6 @@ pub struct Config {
     pub password: String,
     pub method: String,
     pub timeout: u64,
-    pub keepalive_period: u64,
 }
 
 impl Config {
@@ -33,7 +31,6 @@ impl Config {
                     return Err(io::Error::new(io::ErrorKind::Other, e));
                 }
             };
-
             return Ok(config);
         }
 
@@ -47,7 +44,6 @@ impl Config {
                 LOCAL_ADDR.to_string()
             }
         }
-
         if config.server_addr.is_empty() {
             config.server_addr = if let Ok(addr) = env::var("SHADOWSOCKS_SERVER_ADDR") {
                 addr
@@ -55,7 +51,6 @@ impl Config {
                 SERVER_ADDR.to_string()
             }
         }
-
         if config.password.is_empty() {
             config.password = if let Ok(addr) = env::var("SHADOWSOCKS_PASSWORD") {
                 addr
@@ -63,7 +58,6 @@ impl Config {
                 PASSWORD.to_string()
             }
         }
-
         if config.method.is_empty() {
             config.method = if let Ok(addr) = env::var("SHADOWSOCKS_METHOD") {
                 addr
@@ -71,24 +65,12 @@ impl Config {
                 METHOD.to_string()
             }
         }
-
         if config.timeout == 0 {
             config.timeout = if let Ok(timeout) = env::var("SHADOWSOCKS_TIMEOUT") {
                 timeout.parse().expect("invalid timeout value")
             } else {
                 TIMEOUT
             }
-        }
-
-        if config.keepalive_period == 0 {
-            config.keepalive_period =
-                if let Ok(keepalive_period) = env::var("SHADOWSOCKS_KEEPALIVE_PERIOD") {
-                    keepalive_period
-                        .parse()
-                        .expect("invalid keepalive_period value")
-                } else {
-                    KEEPALIVE_PEARID
-                }
         }
         Ok(config)
     }

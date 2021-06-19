@@ -59,10 +59,6 @@ async fn proxy(
     let rawaddr = generate_raw_addr(&host, port);
     write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
 
-    let keepalive_period = config.keepalive_period;
-    socket1.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
-    socket2.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
-
     let (n1, n2) = copy_bidirectional(&mut socket1, &mut socket2, cipher).await?;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
     Ok((n1, n2))

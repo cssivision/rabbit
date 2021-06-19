@@ -3,11 +3,9 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::sync::Arc;
-use std::time::Duration;
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
-use shadowsocks::config::Config;
 use shadowsocks::io::{copy_bidirectional, read_exact};
 use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
@@ -26,13 +24,12 @@ fn main() -> anyhow::Result<()> {
     let cipher = Cipher::new(&config.method, &config.password);
     awak::block_on(async {
         let listener = TcpListener::bind(&config.server_addr).await?;
-        let config = Arc::new(config);
 
         loop {
             let (socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);
             let cipher = Arc::new(Mutex::new(cipher.reset()));
-            let proxy = proxy(config.clone(), cipher, socket).map(|r| {
+            let proxy = proxy(cipher, socket).map(|r| {
                 if let Err(e) = r {
                     log::error!("failed to proxy; error={}", e);
                 }
@@ -44,11 +41,7 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
-async fn proxy(
-    config: Arc<Config>,
-    cipher: Arc<Mutex<Cipher>>,
-    mut socket1: TcpStream,
-) -> io::Result<(u64, u64)> {
+async fn proxy(cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     log::debug!("proxy to address: {}:{}", host, port);
 
@@ -58,10 +51,6 @@ async fn proxy(
     let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
-
-    let keepalive_period = config.keepalive_period;
-    socket1.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
-    socket2.set_keepalive(Some(Duration::from_secs(keepalive_period)))?;
 
     let (n1, n2) = copy_bidirectional(&mut socket2, &mut socket1, cipher).await?;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
