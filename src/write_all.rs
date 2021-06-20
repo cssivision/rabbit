@@ -46,7 +46,7 @@ where
             vec![]
         };
 
-        data.extend_from_slice(&me.buf);
+        data.extend_from_slice(me.buf);
         let data_len = data.len();
         if data_len > me.buf.len() {
             cipher.encrypt(&mut data[data_len - me.buf.len()..]);
