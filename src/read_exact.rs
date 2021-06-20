@@ -1,24 +1,24 @@
+use std::cell::RefCell;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 use crate::util::eof;
 
-use parking_lot::Mutex;
 use slings::AsyncRead;
 
 pub struct DecryptReadExact<'a, A: ?Sized> {
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
     reader: &'a mut A,
     buf: &'a mut [u8],
     pos: usize,
 }
 
 pub fn read_exact<'a, A>(
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
     reader: &'a mut A,
     buf: &'a mut [u8],
 ) -> DecryptReadExact<'a, A>
@@ -41,7 +41,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.borrow_mut();
         if cipher.dec.is_none() {
             let mut iv = vec![0u8; cipher.iv_len];
             while me.pos < iv.len() {

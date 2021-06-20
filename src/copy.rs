@@ -1,19 +1,19 @@
+use std::cell::RefCell;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 use crate::util::eof;
 
-use parking_lot::Mutex;
 use slings::{AsyncRead, AsyncWrite};
 
 pub async fn copy_bidirectional<A, B>(
     a: &mut A,
     b: &mut B,
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
 ) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
@@ -113,7 +113,7 @@ where
 }
 
 struct CopyBuffer {
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
     read_done: bool,
     pos: usize,
     cap: usize,
@@ -122,7 +122,7 @@ struct CopyBuffer {
 }
 
 impl CopyBuffer {
-    fn new(cipher: Arc<Mutex<Cipher>>) -> CopyBuffer {
+    fn new(cipher: Rc<RefCell<Cipher>>) -> CopyBuffer {
         CopyBuffer {
             cipher,
             read_done: false,
@@ -144,7 +144,7 @@ impl CopyBuffer {
         W: AsyncWrite + Unpin + ?Sized,
     {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.borrow_mut();
         if cipher.dec.is_none() {
             let mut iv = vec![0u8; cipher.iv_len];
             while me.pos < iv.len() {
@@ -209,7 +209,7 @@ impl CopyBuffer {
         W: AsyncWrite + Unpin + ?Sized,
     {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.borrow_mut();
         if cipher.enc.is_none() {
             cipher.init_encrypt();
             me.pos = 0;

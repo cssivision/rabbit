@@ -668,7 +668,6 @@ dependencies = [
  "log",
  "md5",
  "once_cell",
- "parking_lot",
  "rand",
  "serde",
  "serde_derive",

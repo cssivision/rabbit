@@ -1,8 +1,9 @@
 #![allow(clippy::many_single_char_names)]
+use std::cell::RefCell;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::rc::Rc;
 use std::str;
-use std::sync::Arc;
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
@@ -12,7 +13,6 @@ use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 
 use futures_util::FutureExt;
-use parking_lot::Mutex;
 use slings::net::{TcpListener, TcpStream};
 use slings::runtime::Runtime;
 
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
         loop {
             let (socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);
-            let cipher = Arc::new(Mutex::new(cipher.reset()));
+            let cipher = Rc::new(RefCell::new(cipher.reset()));
             let proxy = proxy(cipher, socket).map(|r| {
                 if let Err(e) = r {
                     log::error!("failed to proxy; error={}", e);
@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
-async fn proxy(cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> io::Result<(u64, u64)> {
+async fn proxy(cipher: Rc<RefCell<Cipher>>, mut socket1: TcpStream) -> io::Result<(u64, u64)> {
     let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
     log::debug!("proxy to address: {}:{}", host, port);
 
@@ -60,7 +60,7 @@ async fn proxy(cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> io::Result
 }
 
 async fn get_addr_info(
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
     conn: &mut TcpStream,
 ) -> io::Result<(String, u16)> {
     let address_type = &mut vec![0u8; 1];

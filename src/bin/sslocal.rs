@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::io::Error;
 use std::net::IpAddr;
+use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use shadowsocks::args::parse_args;
@@ -14,7 +15,6 @@ use shadowsocks::socks5::{
 };
 
 use futures_util::FutureExt;
-use parking_lot::Mutex;
 use slings::net::{TcpListener, TcpStream};
 use slings::runtime::Runtime;
 
@@ -29,13 +29,13 @@ fn main() -> anyhow::Result<()> {
         log::info!("listening connections on {}", config.local_addr);
 
         let cipher = Cipher::new(&config.method, &config.password);
-        let config = Arc::new(config);
+        let config = Rc::new(config);
 
         loop {
             let (socket, addr) = listener.accept().await?;
             let _ = socket.set_nodelay(true);
             log::debug!("accept tcp stream from addr {:?}", addr);
-            let cipher = Arc::new(Mutex::new(cipher.reset()));
+            let cipher = Rc::new(RefCell::new(cipher.reset()));
             let proxy = proxy(config.clone(), cipher, socket).map(|r| {
                 if let Err(e) = r {
                     log::error!("failed to proxy; error={}", e);
@@ -47,8 +47,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn proxy(
-    config: Arc<Config>,
-    cipher: Arc<Mutex<Cipher>>,
+    config: Rc<Config>,
+    cipher: Rc<RefCell<Cipher>>,
     mut socket1: TcpStream,
 ) -> Result<(u64, u64), Error> {
     let (host, port) = socks5::handshake(&mut socket1, Duration::from_secs(3)).await?;

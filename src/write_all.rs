@@ -1,22 +1,22 @@
+use std::cell::RefCell;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
 
-use parking_lot::Mutex;
 use slings::AsyncWrite;
 
 pub struct EncryptWriteAll<'a, W: ?Sized> {
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
     writer: &'a mut W,
     buf: &'a [u8],
 }
 
 pub fn write_all<'a, W>(
-    cipher: Arc<Mutex<Cipher>>,
+    cipher: Rc<RefCell<Cipher>>,
     writer: &'a mut W,
     buf: &'a [u8],
 ) -> EncryptWriteAll<'a, W>
@@ -38,7 +38,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.borrow_mut();
         let mut data = if cipher.enc.is_none() {
             cipher.init_encrypt();
             cipher.iv.clone()
