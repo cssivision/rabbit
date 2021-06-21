@@ -5,10 +5,10 @@ use std::str::FromStr;
 use crate::util::other;
 
 use c_ares_resolver::FutureResolver;
-use once_cell::sync::Lazy;
 
-static GLOBAL_RESOLVER: Lazy<FutureResolver> =
-    Lazy::new(|| FutureResolver::new().expect("new FutureResolver error"));
+thread_local! {
+    static GLOBAL_RESOLVER: FutureResolver = FutureResolver::new().expect("new FutureResolver error");
+}
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     if let Ok(addr) = IpAddr::from_str(host) {
@@ -16,7 +16,7 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     }
 
     let results = GLOBAL_RESOLVER
-        .query_a(host)
+        .with(|resolver| resolver.query_a(host))
         .await
         .map_err(|e| other(&e.to_string()))?;
 

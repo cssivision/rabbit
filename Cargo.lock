@@ -597,7 +597,6 @@ dependencies = [
  "getopts",
  "log",
  "md5",
- "once_cell",
  "rand",
  "serde",
  "serde_derive",
