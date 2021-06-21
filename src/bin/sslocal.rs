@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use awak::net::{TcpListener, TcpStream};
 use futures_util::FutureExt;
 use parking_lot::Mutex;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
@@ -48,7 +48,7 @@ async fn proxy(
     config: Arc<Config>,
     cipher: Arc<Mutex<Cipher>>,
     mut socket1: TcpStream,
-) -> Result<(u64, u64), Error> {
+) -> io::Result<(u64, u64)> {
     let (host, port) = socks5::handshake(&mut socket1, Duration::from_secs(3)).await?;
 
     log::debug!("proxy to address: {}:{}", host, port);

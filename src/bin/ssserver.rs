@@ -15,7 +15,7 @@ use awak::net::{TcpListener, TcpStream};
 use futures_util::FutureExt;
 use parking_lot::Mutex;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> io::Result<()> {
     env_logger::init();
 
     let config = parse_args("ssserver").expect("invalid config");
