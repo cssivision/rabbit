@@ -16,7 +16,7 @@ use futures_util::FutureExt;
 use slings::net::{TcpListener, TcpStream};
 use slings::runtime::Runtime;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> io::Result<()> {
     env_logger::init();
 
     let config = parse_args("ssserver").expect("invalid config");

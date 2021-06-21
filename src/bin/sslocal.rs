@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::io::Error;
+use std::io;
 use std::net::IpAddr;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -18,7 +18,7 @@ use futures_util::FutureExt;
 use slings::net::{TcpListener, TcpStream};
 use slings::runtime::Runtime;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
@@ -50,7 +50,7 @@ async fn proxy(
     config: Rc<Config>,
     cipher: Rc<RefCell<Cipher>>,
     mut socket1: TcpStream,
-) -> Result<(u64, u64), Error> {
+) -> io::Result<(u64, u64)> {
     let (host, port) = socks5::handshake(&mut socket1, Duration::from_secs(3)).await?;
 
     log::debug!("proxy to address: {}:{}", host, port);
