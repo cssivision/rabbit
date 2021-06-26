@@ -1,5 +1,3 @@
-use crate::util::generate_key;
-
 use aes::{Aes128, Aes192, Aes256};
 use cfb_mode::Cfb;
 use chacha20::ChaCha20;
@@ -7,6 +5,8 @@ use cipher::{consts::U16, AsyncStreamCipher, BlockCipher, BlockEncrypt, NewCiphe
 use ctr::Ctr128BE;
 use rand::distributions::Standard;
 use rand::{thread_rng, Rng};
+
+use crate::util::generate_key;
 
 pub trait SymmetricCipher {
     /// Encrypt data in place.

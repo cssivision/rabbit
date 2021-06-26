@@ -1,9 +1,9 @@
 use std::env;
 use std::process;
 
-use crate::config::Config;
-
 use getopts::Options;
+
+use crate::config::Config;
 
 pub fn parse_args(name: &str) -> Option<Config> {
     let args: Vec<String> = env::args().collect();

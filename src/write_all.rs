@@ -5,9 +5,9 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
-use crate::cipher::Cipher;
-
 use slings::AsyncWrite;
+
+use crate::cipher::Cipher;
 
 pub struct EncryptWriteAll<'a, W: ?Sized> {
     cipher: Rc<RefCell<Cipher>>,

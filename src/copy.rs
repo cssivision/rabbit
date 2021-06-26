@@ -5,10 +5,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
+use slings::{AsyncRead, AsyncWrite};
+
 use crate::cipher::Cipher;
 use crate::util::eof;
-
-use slings::{AsyncRead, AsyncWrite};
 
 pub async fn copy_bidirectional<A, B>(
     a: &mut A,

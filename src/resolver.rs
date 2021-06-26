@@ -2,10 +2,10 @@ use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use crate::util::other;
-
 use dns_resolver::Resolver;
 use once_cell::sync::Lazy;
+
+use crate::util::other;
 
 static GLOBAL_RESOLVER: Lazy<Resolver> = Lazy::new(|| Resolver::new());
 
