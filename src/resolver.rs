@@ -4,25 +4,24 @@ use std::str::FromStr;
 
 use crate::util::other;
 
-use c_ares_resolver::FutureResolver;
+use dns_resolver::Resolver;
+use once_cell::sync::Lazy;
 
-thread_local! {
-    static GLOBAL_RESOLVER: FutureResolver = FutureResolver::new().expect("new FutureResolver error");
-}
+static GLOBAL_RESOLVER: Lazy<Resolver> = Lazy::new(|| Resolver::new());
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     if let Ok(addr) = IpAddr::from_str(host) {
         return Ok(addr);
     }
 
+    let host = host.to_string();
     let results = GLOBAL_RESOLVER
-        .with(|resolver| resolver.query_a(host))
+        .lookup_host(host)
         .await
         .map_err(|e| other(&e.to_string()))?;
 
-    if let Some(result) = results.iter().next() {
-        return Ok(IpAddr::V4(result.ipv4()));
+    if results.len() > 0 {
+        return Ok(results[0]);
     }
-
     Err(other("resolve fail"))
 }
