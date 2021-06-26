@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 
 use crate::util::other;
 
-static GLOBAL_RESOLVER: Lazy<Resolver> = Lazy::new(|| Resolver::new());
+static GLOBAL_RESOLVER: Lazy<Resolver> = Lazy::new(Resolver::new);
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     if let Ok(addr) = IpAddr::from_str(host) {
@@ -20,7 +20,7 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
         .await
         .map_err(|e| other(&e.to_string()))?;
 
-    if results.len() > 0 {
+    if !results.is_empty() {
         return Ok(results[0]);
     }
     Err(other("resolve fail"))
