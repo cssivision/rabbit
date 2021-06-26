@@ -20,9 +20,7 @@ config.json
 	"server_addr": "0.0.0.0:9006",
 	"password": "password",
 	"local_addr": "0.0.0.0:6009",
-	"method": "aes-256-cfb",
-	"timeout": 300,
-	"keepalive_period": 600
+	"method": "aes-256-cfb"
 }
 ```
 
