@@ -4,11 +4,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::cipher::Cipher;
-use crate::util::eof;
-
 use awak::io::{AsyncRead, AsyncWrite};
 use parking_lot::Mutex;
+
+use crate::cipher::Cipher;
+use crate::util::eof;
 
 pub async fn copy_bidirectional<A, B>(
     a: &mut A,

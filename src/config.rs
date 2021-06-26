@@ -8,7 +8,6 @@ static LOCAL_ADDR: &str = "0.0.0.0:6009";
 static SERVER_ADDR: &str = "0.0.0.0:9006";
 static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
-static TIMEOUT: u64 = 100;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(default)]
@@ -17,7 +16,6 @@ pub struct Config {
     pub server_addr: String,
     pub password: String,
     pub method: String,
-    pub timeout: u64,
 }
 
 impl Config {
@@ -63,13 +61,6 @@ impl Config {
                 addr
             } else {
                 METHOD.to_string()
-            }
-        }
-        if config.timeout == 0 {
-            config.timeout = if let Ok(timeout) = env::var("SHADOWSOCKS_TIMEOUT") {
-                timeout.parse().expect("invalid timeout value")
-            } else {
-                TIMEOUT
             }
         }
         Ok(config)

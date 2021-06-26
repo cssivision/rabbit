@@ -4,10 +4,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::cipher::Cipher;
-
 use awak::io::AsyncWrite;
 use parking_lot::Mutex;
+
+use crate::cipher::Cipher;
 
 pub struct EncryptWriteAll<'a, W: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,

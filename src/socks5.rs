@@ -4,11 +4,11 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;
 use std::time::Duration;
 
-use crate::util::other;
-
 use awak::io::{AsyncReadExt, AsyncWriteExt};
 use awak::net::TcpStream;
 use awak::time::timeout;
+
+use crate::util::other;
 
 pub mod v5 {
     pub const VERSION: u8 = 5;

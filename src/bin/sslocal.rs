@@ -4,6 +4,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use awak::net::{TcpListener, TcpStream};
+use futures_util::FutureExt;
+use parking_lot::Mutex;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::config::Config;
@@ -12,10 +15,6 @@ use shadowsocks::socks5::{
     self,
     v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
 };
-
-use awak::net::{TcpListener, TcpStream};
-use futures_util::FutureExt;
-use parking_lot::Mutex;
 
 fn main() -> io::Result<()> {
     env_logger::init();
