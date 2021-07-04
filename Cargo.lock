@@ -42,29 +42,21 @@ dependencies = [
 
 [[package]]
 name = "awak"
-version = "0.2.9"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5a21587948ee3479ac0661f94ea85481e322287ad5cd47b0d16a46bcfb7c72e"
+checksum = "ba5409009205f5368526b8600e6e4281bc2adabc8dcd8160b6859a90ecfdd800"
 dependencies = [
  "async-task",
  "cfg-if 0.1.10",
- "concurrent-queue",
  "futures-util",
  "libc",
  "num_cpus",
  "once_cell",
- "parking_lot",
  "pin-project-lite",
  "rand",
  "slab",
  "socket2",
 ]
-
-[[package]]
-name = "cache-padded"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
 
 [[package]]
 name = "cfb-mode"
@@ -105,15 +97,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "concurrent-queue"
-version = "1.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30ed07550be01594c6026cff2a1d7fe9c8f683caa798e12b68694ac9e88286a3"
-dependencies = [
- "cache-padded",
 ]
 
 [[package]]
