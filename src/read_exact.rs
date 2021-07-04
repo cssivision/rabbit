@@ -2,13 +2,13 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::{Context, Poll};
-
-use awak::io::AsyncRead;
-use parking_lot::Mutex;
 
 use crate::cipher::Cipher;
 use crate::util::eof;
+
+use awak::io::AsyncRead;
 
 pub struct DecryptReadExact<'a, A: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,
@@ -41,7 +41,7 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.lock().unwrap();
         if cipher.dec.is_none() {
             let mut iv = vec![0u8; cipher.iv_len];
             while me.pos < iv.len() {

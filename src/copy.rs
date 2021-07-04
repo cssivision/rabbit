@@ -1,11 +1,10 @@
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use awak::io::{AsyncRead, AsyncWrite};
-use parking_lot::Mutex;
 
 use crate::cipher::Cipher;
 use crate::util::eof;
@@ -144,7 +143,7 @@ impl CopyBuffer {
         W: AsyncWrite + Unpin + ?Sized,
     {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.lock().unwrap();
         if cipher.dec.is_none() {
             let mut iv = vec![0u8; cipher.iv_len];
             while me.pos < iv.len() {
@@ -209,7 +208,7 @@ impl CopyBuffer {
         W: AsyncWrite + Unpin + ?Sized,
     {
         let me = &mut *self;
-        let mut cipher = me.cipher.lock();
+        let mut cipher = me.cipher.lock().unwrap();
         if cipher.enc.is_none() {
             cipher.init_encrypt();
             me.pos = 0;

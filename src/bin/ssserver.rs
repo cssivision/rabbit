@@ -2,11 +2,10 @@
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use awak::net::{TcpListener, TcpStream};
 use futures_util::FutureExt;
-use parking_lot::Mutex;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, read_exact};

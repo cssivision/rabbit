@@ -1,12 +1,11 @@
 use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use awak::net::{TcpListener, TcpStream};
 use futures_util::FutureExt;
-use parking_lot::Mutex;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::config::Config;
