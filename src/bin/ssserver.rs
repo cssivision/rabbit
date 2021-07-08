@@ -13,7 +13,6 @@ use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 use slings::net::{TcpListener, TcpStream};
-use slings::runtime::Runtime;
 
 fn main() -> io::Result<()> {
     env_logger::init();
@@ -21,9 +20,8 @@ fn main() -> io::Result<()> {
     let config = parse_args("ssserver").expect("invalid config");
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
 
-    let runtime = Runtime::new()?;
     let cipher = Cipher::new(&config.method, &config.password);
-    runtime.block_on(async {
+    slings::block_on(async {
         let listener = TcpListener::bind(&config.server_addr).await?;
 
         loop {
