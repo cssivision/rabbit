@@ -119,9 +119,9 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d4ddfc51a4c0134ff489ad4fdabdf68536c815a20fc3061a71a1c78a516dae1"
+checksum = "60fe690ad07820c9885c61c65cf7385c3a5b4271600ca7ee34f34920c58e1ee5"
 dependencies = [
  "awak",
  "domain",
