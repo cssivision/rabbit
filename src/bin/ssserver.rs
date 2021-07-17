@@ -5,7 +5,6 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::str;
 
-use futures_util::FutureExt;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, read_exact};
@@ -16,26 +15,21 @@ use slings::net::{TcpListener, TcpStream};
 
 fn main() -> io::Result<()> {
     env_logger::init();
-
     let config = parse_args("ssserver").expect("invalid config");
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
-
     let cipher = Cipher::new(&config.method, &config.password);
     slings::block_on(async {
         let listener = TcpListener::bind(&config.server_addr).await?;
-
         loop {
             let (socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);
             let cipher = Rc::new(RefCell::new(cipher.reset()));
-            let proxy = proxy(cipher, socket).map(|r| {
-                if let Err(e) = r {
+            let proxy = async move {
+                if let Err(e) = proxy(cipher, socket).await {
                     log::error!("failed to proxy; error={}", e);
-                }
-            });
-
-            let task = slings::spawn_local(proxy);
-            task.detach();
+                };
+            };
+            slings::spawn_local(proxy).detach();
         }
     })
 }
