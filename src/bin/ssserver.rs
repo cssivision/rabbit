@@ -5,7 +5,6 @@ use std::str;
 use std::sync::{Arc, Mutex};
 
 use awak::net::{TcpListener, TcpStream};
-use futures_util::FutureExt;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, read_exact};
@@ -15,26 +14,21 @@ use shadowsocks::util::other;
 
 fn main() -> io::Result<()> {
     env_logger::init();
-
     let config = parse_args("ssserver").expect("invalid config");
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
-
     let cipher = Cipher::new(&config.method, &config.password);
     awak::block_on(async {
         let listener = TcpListener::bind(&config.server_addr).await?;
-
         loop {
             let (socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);
             let cipher = Arc::new(Mutex::new(cipher.reset()));
-            let proxy = proxy(cipher, socket).map(|r| {
-                if let Err(e) = r {
+            let proxy = async move {
+                if let Err(e) = proxy(cipher, socket).await {
                     log::error!("failed to proxy; error={}", e);
-                }
-            });
-
-            let task = awak::spawn(proxy);
-            task.detach();
+                };
+            };
+            awak::spawn(proxy).detach();
         }
     })
 }
