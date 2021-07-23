@@ -128,7 +128,7 @@ impl CopyBuffer {
             amt: 0,
             pos: 0,
             cap: 0,
-            buf: Box::new([0; 1024 * 64]),
+            buf: Box::new([0; 1024 * 2]),
         }
     }
 
