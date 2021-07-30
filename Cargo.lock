@@ -41,12 +41,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bit-vec"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
-
-[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -471,12 +465,11 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "slings"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "186ac414fada6d2e12303fb679210f7086e2e1785c42e26ce400abea9165b1d2"
+checksum = "7c16384463b316b92107f1d056fc7acf31fb6a46fff194050cb5a64335b73be6"
 dependencies = [
  "async-task",
- "bit-vec",
  "futures-util",
  "io-uring",
  "libc",
