@@ -102,8 +102,6 @@ dependencies = [
 [[package]]
 name = "dns-resolver"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6661514796631e0039e258769229410800db56de03ef4f75867296ee85ca33e2"
 dependencies = [
  "domain",
  "resolv-conf",
@@ -466,8 +464,6 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 [[package]]
 name = "slings"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c16384463b316b92107f1d056fc7acf31fb6a46fff194050cb5a64335b73be6"
 dependencies = [
  "async-task",
  "futures-util",

@@ -1,6 +1,6 @@
 {
-	"server_addr": "159.75.235.89:8080",
-	"password": "vfds87y#ki90df",
-	"local_addr": "127.0.0.1:6009",
+	"server_addr": "127.0.0.1:9007",
+	"password": "password",
+	"local_addr": "127.0.0.1:6010",
 	"method": "aes-256-cfb"
 }
