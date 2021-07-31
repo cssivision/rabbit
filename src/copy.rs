@@ -64,7 +64,8 @@ enum TransferState {
     ShuttingDown(u64),
     Done(u64),
 }
-#[derive(Debug)]
+
+#[derive(Debug, Clone, Copy)]
 enum Direction {
     Encrypt,
     Decrypt,
@@ -89,10 +90,10 @@ where
                 TransferState::Running => {
                     let count = match direction {
                         Direction::Encrypt => {
-                            ready!(Pin::new(&mut self.encrypter).poll_encrypt(cx, self.a, self.b))?
+                            ready!(self.encrypter.poll_encrypt(cx, self.a, self.b, direction))?
                         }
                         Direction::Decrypt => {
-                            ready!(Pin::new(&mut self.decrypter).poll_decrypt(cx, self.b, self.a))?
+                            ready!(self.decrypter.poll_decrypt(cx, self.b, self.a, direction))?
                         }
                     };
 
@@ -119,6 +120,7 @@ struct CopyBuffer {
     cap: usize,
     amt: u64,
     buf: Box<[u8]>,
+    need_flush: bool,
 }
 
 impl CopyBuffer {
@@ -130,79 +132,66 @@ impl CopyBuffer {
             pos: 0,
             cap: 0,
             buf: Box::new([0; 1024 * 2]),
+            need_flush: false,
         }
     }
 
     fn poll_decrypt<'a, R, W>(
-        mut self: Pin<&mut Self>,
+        &mut self,
         cx: &mut Context,
         mut reader: &'a mut R,
-        mut writer: &'a mut W,
+        writer: &'a mut W,
+        direction: Direction,
     ) -> Poll<io::Result<u64>>
     where
         R: AsyncRead + Unpin + ?Sized,
         W: AsyncWrite + Unpin + ?Sized,
     {
-        let me = &mut *self;
-        let mut cipher = me.cipher.borrow_mut();
-        if cipher.dec.is_none() {
+        if self.cipher.borrow().dec.is_none() {
+            let mut cipher = self.cipher.borrow_mut();
             let mut iv = vec![0u8; cipher.iv_len];
-            while me.pos < iv.len() {
-                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut iv[me.pos..]))?;
-                me.pos += n;
+            while self.pos < iv.len() {
+                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut iv[self.pos..]))?;
+                self.pos += n;
                 if n == 0 {
                     return Err(eof()).into();
                 }
             }
-
-            me.pos = 0;
+            self.pos = 0;
             cipher.iv = iv.clone();
             cipher.init_decrypt(&iv);
         }
-
-        loop {
-            // If our buffer is empty, then we need to read some data to
-            // continue.
-            if me.pos == me.cap && !me.read_done {
-                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut me.buf))?;
-                if n == 0 {
-                    me.read_done = true;
-                } else {
-                    cipher.decrypt(&mut me.buf[..n]);
-
-                    me.pos = 0;
-                    me.cap = n;
-                }
-            }
-
-            // If our buffer has some data, let's write it out!
-            while me.pos < me.cap {
-                let i = ready!(Pin::new(&mut writer).poll_write(cx, &me.buf[me.pos..me.cap]))?;
-                if i == 0 {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "write zero byte into writer",
-                    )));
-                } else {
-                    me.pos += i;
-                    me.amt += i as u64;
-                }
-            }
-
-            // If we've written all the data and we've seen EOF, flush out the
-            // data and finish the transfer.
-            if me.pos == me.cap && me.read_done {
-                ready!(Pin::new(&mut writer).poll_flush(cx))?;
-                return Poll::Ready(Ok(me.amt));
-            }
-        }
+        self.poll_copy(cx, reader, writer, direction)
     }
 
     fn poll_encrypt<'a, R, W>(
-        mut self: Pin<&mut Self>,
+        &mut self,
+        cx: &mut Context,
+        reader: &'a mut R,
+        writer: &'a mut W,
+        direction: Direction,
+    ) -> Poll<io::Result<u64>>
+    where
+        R: AsyncRead + Unpin + ?Sized,
+        W: AsyncWrite + Unpin + ?Sized,
+    {
+        if self.cipher.borrow().enc.is_none() {
+            let mut cipher = self.cipher.borrow_mut();
+            cipher.init_encrypt();
+            self.pos = 0;
+            let n = cipher.iv.len();
+            self.cap = n;
+            self.buf[..n].copy_from_slice(&cipher.iv);
+        }
+        self.poll_copy(cx, reader, writer, direction)
+    }
+
+    fn poll_copy<'a, R, W>(
+        &mut self,
         cx: &mut Context,
         mut reader: &'a mut R,
         mut writer: &'a mut W,
+        direction: Direction,
     ) -> Poll<io::Result<u64>>
     where
         R: AsyncRead + Unpin + ?Sized,
@@ -210,24 +199,34 @@ impl CopyBuffer {
     {
         let me = &mut *self;
         let mut cipher = me.cipher.borrow_mut();
-        if cipher.enc.is_none() {
-            cipher.init_encrypt();
-            me.pos = 0;
-            let n = cipher.iv.len();
-            me.cap = n;
-            me.buf[..n].copy_from_slice(&cipher.iv);
-        }
-
         loop {
             // If our buffer is empty, then we need to read some data to
             // continue.
             if me.pos == me.cap && !me.read_done {
-                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut me.buf))?;
+                let n = match Pin::new(&mut reader).poll_read(cx, &mut me.buf) {
+                    Poll::Ready(Ok(n)) => n,
+                    Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                    Poll::Pending => {
+                        // Try flushing when the reader has no progress to avoid deadlock
+                        // when the reader depends on buffered writer.
+                        if me.need_flush {
+                            ready!(Pin::new(&mut writer).poll_flush(cx))?;
+                            me.need_flush = false;
+                        }
+                        return Poll::Pending;
+                    }
+                };
                 if n == 0 {
                     me.read_done = true;
                 } else {
-                    cipher.encrypt(&mut me.buf[..n]);
-
+                    match direction {
+                        Direction::Decrypt => {
+                            cipher.decrypt(&mut me.buf[..n]);
+                        }
+                        Direction::Encrypt => {
+                            cipher.encrypt(&mut me.buf[..n]);
+                        }
+                    }
                     me.pos = 0;
                     me.cap = n;
                 }
@@ -244,6 +243,7 @@ impl CopyBuffer {
                 } else {
                     me.pos += i;
                     me.amt += i as u64;
+                    me.need_flush = true;
                 }
             }
 
