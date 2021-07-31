@@ -101,13 +101,13 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6661514796631e0039e258769229410800db56de03ef4f75867296ee85ca33e2"
+checksum = "7fb3b00aee85e121e30172132c907736375cc50f1c6cf4524aa540346bf288ea"
 dependencies = [
  "domain",
  "resolv-conf",
- "slings 0.2.15",
+ "slings",
 ]
 
 [[package]]
@@ -454,7 +454,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "slings 0.3.0",
+ "slings",
 ]
 
 [[package]]
@@ -462,21 +462,6 @@ name = "slab"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
-
-[[package]]
-name = "slings"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a0d8883311b99ca21b68cf003cb865f0312642137d67427254afa80541de59c"
-dependencies = [
- "async-task",
- "futures-util",
- "io-uring",
- "libc",
- "pin-project-lite",
- "scoped-tls",
- "slab",
-]
 
 [[package]]
 name = "slings"
