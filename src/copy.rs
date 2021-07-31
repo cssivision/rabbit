@@ -96,7 +96,6 @@ where
                             ready!(self.decrypter.poll_decrypt(cx, self.b, self.a, direction))?
                         }
                     };
-
                     *state = TransferState::ShuttingDown(count);
                 }
                 TransferState::ShuttingDown(count) => {
@@ -104,7 +103,6 @@ where
                         Direction::Encrypt => ready!(Pin::new(&mut self.b).poll_close(cx))?,
                         Direction::Decrypt => ready!(Pin::new(&mut self.a).poll_close(cx))?,
                     };
-
                     *state = TransferState::Done(*count);
                 }
                 TransferState::Done(count) => return Poll::Ready(Ok(*count)),
@@ -121,10 +119,12 @@ struct CopyBuffer {
     amt: u64,
     buf: Box<[u8]>,
     need_flush: bool,
+    iv: Vec<u8>,
 }
 
 impl CopyBuffer {
     fn new(cipher: Rc<RefCell<Cipher>>) -> CopyBuffer {
+        let iv_len = cipher.borrow().iv_len;
         CopyBuffer {
             cipher,
             read_done: false,
@@ -133,6 +133,7 @@ impl CopyBuffer {
             cap: 0,
             buf: Box::new([0; 1024 * 2]),
             need_flush: false,
+            iv: vec![0u8; iv_len],
         }
     }
 
@@ -149,17 +150,16 @@ impl CopyBuffer {
     {
         if self.cipher.borrow().dec.is_none() {
             let mut cipher = self.cipher.borrow_mut();
-            let mut iv = vec![0u8; cipher.iv_len];
-            while self.pos < iv.len() {
-                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut iv[self.pos..]))?;
+            while self.pos < self.iv.len() {
+                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut self.iv[self.pos..]))?;
                 self.pos += n;
                 if n == 0 {
                     return Err(eof()).into();
                 }
             }
             self.pos = 0;
-            cipher.iv = iv.clone();
-            cipher.init_decrypt(&iv);
+            cipher.iv = self.iv.clone();
+            cipher.init_decrypt(&self.iv);
         }
         self.poll_copy(cx, reader, writer, direction)
     }
@@ -197,61 +197,61 @@ impl CopyBuffer {
         R: AsyncRead + Unpin + ?Sized,
         W: AsyncWrite + Unpin + ?Sized,
     {
-        let me = &mut *self;
-        let mut cipher = me.cipher.borrow_mut();
         loop {
             // If our buffer is empty, then we need to read some data to
             // continue.
-            if me.pos == me.cap && !me.read_done {
-                let n = match Pin::new(&mut reader).poll_read(cx, &mut me.buf) {
+            if self.pos == self.cap && !self.read_done {
+                let n = match Pin::new(&mut reader).poll_read(cx, &mut self.buf) {
                     Poll::Ready(Ok(n)) => n,
                     Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
                     Poll::Pending => {
                         // Try flushing when the reader has no progress to avoid deadlock
                         // when the reader depends on buffered writer.
-                        if me.need_flush {
+                        if self.need_flush {
                             ready!(Pin::new(&mut writer).poll_flush(cx))?;
-                            me.need_flush = false;
+                            self.need_flush = false;
                         }
                         return Poll::Pending;
                     }
                 };
                 if n == 0 {
-                    me.read_done = true;
+                    self.read_done = true;
                 } else {
+                    let mut cipher = self.cipher.borrow_mut();
                     match direction {
                         Direction::Decrypt => {
-                            cipher.decrypt(&mut me.buf[..n]);
+                            cipher.decrypt(&mut self.buf[..n]);
                         }
                         Direction::Encrypt => {
-                            cipher.encrypt(&mut me.buf[..n]);
+                            cipher.encrypt(&mut self.buf[..n]);
                         }
                     }
-                    me.pos = 0;
-                    me.cap = n;
+                    self.pos = 0;
+                    self.cap = n;
                 }
             }
 
             // If our buffer has some data, let's write it out!
-            while me.pos < me.cap {
-                let i = ready!(Pin::new(&mut writer).poll_write(cx, &me.buf[me.pos..me.cap]))?;
+            while self.pos < self.cap {
+                let i =
+                    ready!(Pin::new(&mut writer).poll_write(cx, &self.buf[self.pos..self.cap]))?;
                 if i == 0 {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::WriteZero,
                         "write zero byte into writer",
                     )));
                 } else {
-                    me.pos += i;
-                    me.amt += i as u64;
-                    me.need_flush = true;
+                    self.pos += i;
+                    self.amt += i as u64;
+                    self.need_flush = true;
                 }
             }
 
             // If we've written all the data and we've seen EOF, flush out the
             // data and finish the transfer.
-            if me.pos == me.cap && me.read_done {
+            if self.pos == self.cap && self.read_done {
                 ready!(Pin::new(&mut writer).poll_flush(cx))?;
-                return Poll::Ready(Ok(me.amt));
+                return Poll::Ready(Ok(self.amt));
             }
         }
     }
