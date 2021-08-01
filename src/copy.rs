@@ -90,10 +90,10 @@ where
                 TransferState::Running => {
                     let count = match direction {
                         Direction::Encrypt => {
-                            ready!(self.encrypter.poll_encrypt(cx, self.a, self.b, direction))?
+                            ready!(self.encrypter.poll_encrypt(cx, self.a, self.b))?
                         }
                         Direction::Decrypt => {
-                            ready!(self.decrypter.poll_decrypt(cx, self.b, self.a, direction))?
+                            ready!(self.decrypter.poll_decrypt(cx, self.b, self.a))?
                         }
                     };
                     *state = TransferState::ShuttingDown(count);
@@ -142,7 +142,6 @@ impl CopyBuffer {
         cx: &mut Context,
         mut reader: &'a mut R,
         writer: &'a mut W,
-        direction: Direction,
     ) -> Poll<io::Result<u64>>
     where
         R: AsyncRead + Unpin + ?Sized,
@@ -161,7 +160,7 @@ impl CopyBuffer {
             cipher.iv = self.iv.clone();
             cipher.init_decrypt(&self.iv);
         }
-        self.poll_copy(cx, reader, writer, direction)
+        self.poll_copy(cx, reader, writer, Direction::Decrypt)
     }
 
     fn poll_encrypt<'a, R, W>(
@@ -169,7 +168,6 @@ impl CopyBuffer {
         cx: &mut Context,
         reader: &'a mut R,
         writer: &'a mut W,
-        direction: Direction,
     ) -> Poll<io::Result<u64>>
     where
         R: AsyncRead + Unpin + ?Sized,
@@ -183,7 +181,7 @@ impl CopyBuffer {
             self.cap = n;
             self.buf[..n].copy_from_slice(&cipher.iv);
         }
-        self.poll_copy(cx, reader, writer, direction)
+        self.poll_copy(cx, reader, writer, Direction::Encrypt)
     }
 
     fn poll_copy<'a, R, W>(
