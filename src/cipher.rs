@@ -132,8 +132,8 @@ impl Cipher {
         }
     }
 
-    pub fn init_decrypt(&mut self, iv: &[u8]) {
-        self.dec = Some(self.new_cipher(iv));
+    pub fn init_decrypt(&mut self) {
+        self.dec = Some(self.new_cipher(&self.iv));
     }
 
     pub fn encrypt(&mut self, input: &mut [u8]) {
@@ -151,7 +151,7 @@ impl Cipher {
     pub fn reset(&self) -> Cipher {
         Cipher {
             key: self.key.clone(),
-            iv: vec![],
+            iv: vec![0u8; self.iv_len],
             key_len: self.key_len,
             iv_len: self.iv_len,
             enc: None,

@@ -15,7 +15,6 @@ pub struct DecryptReadExact<'a, A: ?Sized> {
     reader: &'a mut A,
     buf: &'a mut [u8],
     pos: usize,
-    iv: Vec<u8>,
 }
 
 pub fn read_exact<'a, A>(
@@ -26,13 +25,11 @@ pub fn read_exact<'a, A>(
 where
     A: AsyncRead + Unpin + ?Sized,
 {
-    let iv_len = cipher.borrow().iv_len;
     DecryptReadExact {
         cipher,
         reader,
         buf,
         pos: 0,
-        iv: vec![0u8; iv_len],
     }
 }
 
@@ -46,17 +43,15 @@ where
         let me = &mut *self;
         let mut cipher = me.cipher.borrow_mut();
         if cipher.dec.is_none() {
-            while me.pos < me.iv.len() {
-                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.iv[me.pos..]))?;
+            while me.pos < cipher.iv.len() {
+                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut cipher.iv[me.pos..]))?;
                 me.pos += n;
                 if n == 0 {
                     return Err(eof()).into();
                 }
             }
-
             me.pos = 0;
-            cipher.iv = me.iv.clone();
-            cipher.init_decrypt(&me.iv);
+            cipher.init_decrypt();
         };
 
         // if our buffer is empty, then we need to read some data to continue.

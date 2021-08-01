@@ -119,12 +119,10 @@ struct CopyBuffer {
     amt: u64,
     buf: Box<[u8]>,
     need_flush: bool,
-    iv: Vec<u8>,
 }
 
 impl CopyBuffer {
     fn new(cipher: Rc<RefCell<Cipher>>) -> CopyBuffer {
-        let iv_len = cipher.borrow().iv_len;
         CopyBuffer {
             cipher,
             read_done: false,
@@ -133,7 +131,6 @@ impl CopyBuffer {
             cap: 0,
             buf: Box::new([0; 1024 * 2]),
             need_flush: false,
-            iv: vec![0u8; iv_len],
         }
     }
 
@@ -150,16 +147,16 @@ impl CopyBuffer {
         {
             let mut cipher = self.cipher.borrow_mut();
             if cipher.dec.is_none() {
-                while self.pos < self.iv.len() {
-                    let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut self.iv[self.pos..]))?;
+                while self.pos < cipher.iv.len() {
+                    let n =
+                        ready!(Pin::new(&mut reader).poll_read(cx, &mut cipher.iv[self.pos..]))?;
                     self.pos += n;
                     if n == 0 {
                         return Err(eof()).into();
                     }
                 }
                 self.pos = 0;
-                cipher.iv = self.iv.clone();
-                cipher.init_decrypt(&self.iv);
+                cipher.init_decrypt();
             }
         }
         self.poll_copy(cx, reader, writer, Direction::Decrypt)
