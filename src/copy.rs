@@ -147,18 +147,20 @@ impl CopyBuffer {
         R: AsyncRead + Unpin + ?Sized,
         W: AsyncWrite + Unpin + ?Sized,
     {
-        if self.cipher.lock().unwrap().dec.is_none() {
+        {
             let mut cipher = self.cipher.lock().unwrap();
-            while self.pos < self.iv.len() {
-                let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut self.iv[self.pos..]))?;
-                self.pos += n;
-                if n == 0 {
-                    return Err(eof()).into();
+            if cipher.dec.is_none() {
+                while self.pos < self.iv.len() {
+                    let n = ready!(Pin::new(&mut reader).poll_read(cx, &mut self.iv[self.pos..]))?;
+                    self.pos += n;
+                    if n == 0 {
+                        return Err(eof()).into();
+                    }
                 }
+                self.pos = 0;
+                cipher.iv = self.iv.clone();
+                cipher.init_decrypt(&self.iv);
             }
-            self.pos = 0;
-            cipher.iv = self.iv.clone();
-            cipher.init_decrypt(&self.iv);
         }
         self.poll_copy(cx, reader, writer, Direction::Decrypt)
     }
@@ -173,13 +175,15 @@ impl CopyBuffer {
         R: AsyncRead + Unpin + ?Sized,
         W: AsyncWrite + Unpin + ?Sized,
     {
-        if self.cipher.lock().unwrap().enc.is_none() {
+        {
             let mut cipher = self.cipher.lock().unwrap();
-            cipher.init_encrypt();
-            self.pos = 0;
-            let n = cipher.iv.len();
-            self.cap = n;
-            self.buf[..n].copy_from_slice(&cipher.iv);
+            if cipher.enc.is_none() {
+                cipher.init_encrypt();
+                self.pos = 0;
+                let n = cipher.iv.len();
+                self.cap = n;
+                self.buf[..n].copy_from_slice(&cipher.iv);
+            }
         }
         self.poll_copy(cx, reader, writer, Direction::Encrypt)
     }
