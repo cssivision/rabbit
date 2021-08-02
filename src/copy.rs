@@ -177,7 +177,8 @@ impl CopyBuffer {
             if cipher.enc.is_none() {
                 cipher.init_encrypt();
                 self.pos = 0;
-                self.cap = cipher.iv.len();
+                let n = cipher.iv.len();
+                self.cap = n;
                 self.buf[..n].copy_from_slice(&cipher.iv);
             }
         }
