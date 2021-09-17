@@ -4,20 +4,23 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::sync::{Arc, Mutex};
 
-use awak::net::{TcpListener, TcpStream};
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, read_exact};
 use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::runtime::Runtime;
 
 fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("ssserver").expect("invalid config");
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
     let cipher = Cipher::new(&config.method, &config.password);
-    awak::block_on(async {
+
+    let rt = Runtime::new()?;
+    rt.block_on(async {
         let listener = TcpListener::bind(&config.server_addr).await?;
         loop {
             let (socket, addr) = listener.accept().await?;
@@ -28,7 +31,7 @@ fn main() -> io::Result<()> {
                     log::error!("failed to proxy; error={}", e);
                 };
             };
-            awak::spawn(proxy).detach();
+            tokio::spawn(proxy);
         }
     })
 }

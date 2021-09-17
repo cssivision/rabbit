@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use crate::cipher::Cipher;
 use crate::util::eof;
 
-use awak::io::AsyncRead;
+use tokio::io::{AsyncRead, ReadBuf};
 
 pub struct DecryptReadExact<'a, A: ?Sized> {
     cipher: Arc<Mutex<Cipher>>,
@@ -44,7 +44,9 @@ where
         let mut cipher = me.cipher.lock().unwrap();
         if cipher.dec.is_none() {
             while me.pos < cipher.iv.len() {
-                let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut cipher.iv[me.pos..]))?;
+                let mut buf = ReadBuf::new(&mut cipher.iv[me.pos..]);
+                ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut buf))?;
+                let n = buf.filled().len();
                 me.pos += n;
                 if n == 0 {
                     return Err(eof()).into();
@@ -56,7 +58,9 @@ where
 
         // if our buffer is empty, then we need to read some data to continue.
         while me.pos < me.buf.len() {
-            let n = ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf[me.pos..]))?;
+            let mut buf = ReadBuf::new(&mut cipher.iv[me.pos..]);
+            ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut buf))?;
+            let n = buf.filled().len();
             me.pos += n;
             if n == 0 {
                 return Err(eof()).into();

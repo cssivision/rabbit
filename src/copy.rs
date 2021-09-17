@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use awak::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::cipher::Cipher;
 use crate::util::eof;
@@ -99,8 +99,8 @@ where
                 }
                 TransferState::ShuttingDown(count) => {
                     match direction {
-                        Direction::Encrypt => ready!(Pin::new(&mut self.b).poll_close(cx))?,
-                        Direction::Decrypt => ready!(Pin::new(&mut self.a).poll_close(cx))?,
+                        Direction::Encrypt => ready!(Pin::new(&mut self.b).poll_shutdown(cx))?,
+                        Direction::Decrypt => ready!(Pin::new(&mut self.a).poll_shutdown(cx))?,
                     };
 
                     *state = TransferState::Done(*count);
@@ -148,8 +148,9 @@ impl CopyBuffer {
             let mut cipher = self.cipher.lock().unwrap();
             if cipher.dec.is_none() {
                 while self.pos < cipher.iv.len() {
-                    let n =
-                        ready!(Pin::new(&mut reader).poll_read(cx, &mut cipher.iv[self.pos..]))?;
+                    let mut buf = ReadBuf::new(&mut cipher.iv[self.pos..]);
+                    ready!(Pin::new(&mut reader).poll_read(cx, &mut buf))?;
+                    let n = buf.filled().len();
                     self.pos += n;
                     if n == 0 {
                         return Err(eof()).into();
@@ -200,8 +201,9 @@ impl CopyBuffer {
             // If our buffer is empty, then we need to read some data to
             // continue.
             if self.pos == self.cap && !self.read_done {
-                let n = match Pin::new(&mut reader).poll_read(cx, &mut self.buf) {
-                    Poll::Ready(Ok(n)) => n,
+                let mut buf = ReadBuf::new(&mut self.buf);
+                let n = match Pin::new(&mut reader).poll_read(cx, &mut buf) {
+                    Poll::Ready(Ok(())) => buf.filled().len(),
                     Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
                     Poll::Pending => {
                         // Try flushing when the reader has no progress to avoid deadlock

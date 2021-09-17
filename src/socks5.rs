@@ -4,9 +4,9 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;
 use std::time::Duration;
 
-use awak::io::{AsyncReadExt, AsyncWriteExt};
-use awak::net::TcpStream;
-use awak::time::timeout;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::time::timeout;
 
 use crate::util::other;
 
