@@ -58,7 +58,7 @@ where
 
         // if our buffer is empty, then we need to read some data to continue.
         while me.pos < me.buf.len() {
-            let mut buf = ReadBuf::new(&mut cipher.iv[me.pos..]);
+            let mut buf = ReadBuf::new(&mut me.buf[me.pos..]);
             ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut buf))?;
             let n = buf.filled().len();
             me.pos += n;
