@@ -9,11 +9,17 @@ use slings::AsyncWrite;
 
 use crate::cipher::Cipher;
 
+enum State {
+    Iv,
+    Write(Vec<u8>),
+    Done,
+}
+
 pub struct EncryptWriteAll<'a, W: ?Sized> {
     cipher: Rc<RefCell<Cipher>>,
     writer: &'a mut W,
     buf: &'a [u8],
-    encrypt_buf: Vec<u8>,
+    state: State,
 }
 
 pub fn write_all<'a, W>(
@@ -28,7 +34,7 @@ where
         cipher,
         writer,
         buf,
-        encrypt_buf: vec![],
+        state: State::Iv,
     }
 }
 
@@ -40,30 +46,36 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let me = &mut *self;
-        let mut cipher = me.cipher.borrow_mut();
-        if me.encrypt_buf.is_empty() {
-            let mut data = if cipher.enc.is_none() {
-                cipher.init_encrypt();
-                cipher.iv.clone()
-            } else {
-                vec![]
-            };
-
-            data.extend_from_slice(me.buf);
-            let data_len = data.len();
-            if data_len > me.buf.len() {
-                cipher.encrypt(&mut data[data_len - me.buf.len()..]);
+        loop {
+            match &mut me.state {
+                State::Iv => {
+                    let mut cipher = me.cipher.borrow_mut();
+                    if cipher.enc.is_some() {
+                        me.state = State::Write(vec![]);
+                        continue;
+                    }
+                    cipher.init_encrypt();
+                    let iv = cipher.iv.clone();
+                    let iv_len = iv.len();
+                    let mut data = iv;
+                    data.extend_from_slice(me.buf);
+                    cipher.encrypt(&mut data[iv_len..]);
+                    me.state = State::Write(data);
+                }
+                State::Write(data) => {
+                    while !data.is_empty() {
+                        let n = ready!(Pin::new(&mut me.writer).poll_write(cx, data))?;
+                        if n == 0 {
+                            return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
+                        }
+                        data.drain(0..n);
+                    }
+                    me.state = State::Done;
+                }
+                State::Done => {
+                    return Poll::Ready(Ok(()));
+                }
             }
-            me.encrypt_buf = data;
         }
-
-        while !me.encrypt_buf.is_empty() {
-            let n = ready!(Pin::new(&mut me.writer).poll_write(cx, &me.encrypt_buf))?;
-            if n == 0 {
-                return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
-            }
-            me.encrypt_buf.drain(0..n);
-        }
-        Poll::Ready(Ok(()))
     }
 }
