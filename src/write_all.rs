@@ -49,6 +49,10 @@ where
             match &mut me.state {
                 State::Iv => {
                     let mut cipher = me.cipher.lock().unwrap();
+                    if cipher.enc.is_some() {
+                        me.state = State::Write(vec![]);
+                        continue;
+                    }
                     cipher.init_encrypt();
                     let iv = cipher.iv.clone();
                     let iv_len = iv.len();

@@ -53,6 +53,10 @@ where
             match &mut me.state {
                 State::Iv => {
                     let mut cipher = me.cipher.lock().unwrap();
+                    if cipher.dec.is_some() {
+                        me.state = State::Read;
+                        continue;
+                    }
                     while me.pos < cipher.iv.len() {
                         let n = ready!(
                             Pin::new(&mut *me.reader).poll_read(cx, &mut cipher.iv[me.pos..])
