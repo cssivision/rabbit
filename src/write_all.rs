@@ -49,15 +49,14 @@ where
             match &mut me.state {
                 State::Iv => {
                     let mut cipher = me.cipher.lock().unwrap();
-                    if cipher.enc.is_some() {
+                    if cipher.is_encrypt_inited() {
                         me.state = State::Write(vec![]);
                         continue;
                     }
                     cipher.init_encrypt();
-                    let iv = cipher.iv.clone();
-                    let iv_len = iv.len();
-                    let mut data = iv;
+                    let mut data = cipher.iv().to_vec();
                     data.extend_from_slice(me.buf);
+                    let iv_len = cipher.iv_len();
                     cipher.encrypt(&mut data[iv_len..]);
                     me.state = State::Write(data);
                 }

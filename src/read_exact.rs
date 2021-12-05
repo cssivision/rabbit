@@ -53,14 +53,14 @@ where
             match &mut me.state {
                 State::Iv => {
                     let mut cipher = me.cipher.lock().unwrap();
-                    if cipher.dec.is_some() {
+                    if cipher.is_decrypt_inited() {
                         me.state = State::Read;
                         continue;
                     }
-                    while me.pos < cipher.iv.len() {
-                        let n = ready!(
-                            Pin::new(&mut *me.reader).poll_read(cx, &mut cipher.iv[me.pos..])
-                        )?;
+                    while me.pos < cipher.iv_len() {
+                        let n =
+                            ready!(Pin::new(&mut *me.reader)
+                                .poll_read(cx, &mut cipher.iv_mut()[me.pos..]))?;
                         me.pos += n;
                         if n == 0 {
                             return Err(eof()).into();
