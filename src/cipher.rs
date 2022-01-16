@@ -168,6 +168,7 @@ impl Cipher {
         }
     }
 
+    #[must_use]
     pub fn reset(&self) -> Cipher {
         Cipher {
             key: self.key.clone(),
