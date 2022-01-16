@@ -1,8 +1,7 @@
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use crate::cipher::Cipher;
