@@ -5,10 +5,11 @@ use std::str;
 use std::sync::{Arc, Mutex};
 
 use awak::io::{AsyncRead, AsyncWrite};
-use awak::net::{TcpListener, TcpStream};
+use awak::net::TcpStream;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, read_exact};
+use shadowsocks::listener::Listener;
 use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
@@ -19,10 +20,9 @@ fn main() -> io::Result<()> {
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
     let cipher = Cipher::new(&config.method, &config.password);
     awak::block_on(async {
-        let listener = TcpListener::bind(&config.server_addr).await?;
+        let listener = Listener::bind(&config.server_addr, config.unix_socket).await?;
         loop {
-            let (mut socket, addr) = listener.accept().await?;
-            log::debug!("accept stream from addr {:?}", addr);
+            let mut socket = listener.accept().await?;
             let cipher = cipher.reset();
             let proxy = async move {
                 if let Err(e) = proxy(cipher, &mut socket).await {

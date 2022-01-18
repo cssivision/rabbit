@@ -16,6 +16,7 @@ pub struct Config {
     pub server_addr: String,
     pub password: String,
     pub method: String,
+    pub unix_socket: bool,
 }
 
 impl Config {
@@ -37,6 +38,7 @@ impl Config {
             server_addr: SERVER_ADDR.to_string(),
             password: PASSWORD.to_string(),
             method: METHOD.to_string(),
+            unix_socket: false,
         };
         if let Ok(addr) = env::var("SHADOWSOCKS_LOCAL_ADDR") {
             config.local_addr = addr;
@@ -49,6 +51,9 @@ impl Config {
         }
         if let Ok(method) = env::var("SHADOWSOCKS_METHOD") {
             config.method = method;
+        }
+        if let Ok(unix_socket) = env::var("SHADOWSOCKS_UNIX_SOCKET") {
+            config.method = unix_socket.parse().unwrap_or_default();
         }
         Ok(config)
     }

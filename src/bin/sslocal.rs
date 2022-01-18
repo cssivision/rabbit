@@ -5,11 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use awak::io::{AsyncRead, AsyncWrite};
-use awak::net::{TcpListener, TcpStream};
+use awak::net::TcpStream;
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::config::Config;
 use shadowsocks::io::{copy_bidirectional, write_all};
+use shadowsocks::listener::Listener;
 use shadowsocks::socks5::{
     self,
     v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
@@ -22,12 +23,10 @@ fn main() -> io::Result<()> {
     let cipher = Cipher::new(&config.method, &config.password);
     let config = Arc::new(config);
     awak::block_on(async {
-        let listener = TcpListener::bind(&config.local_addr).await?;
+        let listener = Listener::bind(&config.local_addr, config.unix_socket).await?;
         log::info!("listening connections on {}", config.local_addr);
         loop {
-            let (mut socket, addr) = listener.accept().await?;
-            let _ = socket.set_nodelay(true);
-            log::debug!("accept stream from addr {:?}", addr);
+            let mut socket = listener.accept().await?;
             let cipher = cipher.reset();
             let config = config.clone();
             let proxy = async move {
