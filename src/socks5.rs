@@ -4,8 +4,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;
 use std::time::Duration;
 
-use awak::io::{AsyncReadExt, AsyncWriteExt};
-use awak::net::TcpStream;
+use awak::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use awak::time::timeout;
 
 use crate::util::other;
@@ -24,7 +23,10 @@ pub mod v5 {
 ///
 /// if success The returned future will the handled `TcpStream` and address. if handle shake fail will
 /// return `io::Error`.
-pub async fn handshake(conn: &mut TcpStream, dur: Duration) -> io::Result<(String, u16)> {
+pub async fn handshake<A>(conn: &mut A, dur: Duration) -> io::Result<(String, u16)>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
     let fut = async move {
         // socks version, only support version 5.
         let buf1 = &mut [0u8; 2];

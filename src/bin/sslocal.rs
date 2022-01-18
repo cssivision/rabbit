@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use awak::io::{AsyncRead, AsyncWrite};
 use awak::net::{TcpListener, TcpStream};
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
@@ -18,19 +19,19 @@ fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
+    let cipher = Cipher::new(&config.method, &config.password);
+    let config = Arc::new(config);
     awak::block_on(async {
         let listener = TcpListener::bind(&config.local_addr).await?;
         log::info!("listening connections on {}", config.local_addr);
-        let cipher = Cipher::new(&config.method, &config.password);
-        let config = Arc::new(config);
         loop {
-            let (socket, addr) = listener.accept().await?;
+            let (mut socket, addr) = listener.accept().await?;
             let _ = socket.set_nodelay(true);
-            log::debug!("accept tcp stream from addr {:?}", addr);
-            let cipher = Arc::new(Mutex::new(cipher.reset()));
+            log::debug!("accept stream from addr {:?}", addr);
+            let cipher = cipher.reset();
             let config = config.clone();
             let proxy = async move {
-                if let Err(e) = proxy(config, cipher, socket).await {
+                if let Err(e) = proxy(config, cipher, &mut socket).await {
                     log::error!("failed to proxy; error={}", e);
                 }
             };
@@ -39,13 +40,13 @@ fn main() -> io::Result<()> {
     })
 }
 
-async fn proxy(
-    config: Arc<Config>,
-    cipher: Arc<Mutex<Cipher>>,
-    mut socket1: TcpStream,
-) -> io::Result<(u64, u64)> {
-    let (host, port) = socks5::handshake(&mut socket1, Duration::from_secs(3)).await?;
+async fn proxy<A>(config: Arc<Config>, cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
+    let cipher = Arc::new(Mutex::new(cipher));
 
+    let (host, port) = socks5::handshake(socket1, Duration::from_secs(3)).await?;
     log::debug!("proxy to address: {}:{}", host, port);
 
     let mut socket2 = TcpStream::connect(&config.server_addr).await?;
@@ -54,7 +55,7 @@ async fn proxy(
     let rawaddr = generate_raw_addr(&host, port);
     write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
 
-    let (n1, n2) = copy_bidirectional(&mut socket1, &mut socket2, cipher).await?;
+    let (n1, n2) = copy_bidirectional(socket1, &mut socket2, cipher).await?;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
     Ok((n1, n2))
 }
