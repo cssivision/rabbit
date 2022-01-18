@@ -33,35 +33,22 @@ impl Config {
         }
 
         let mut config = Config {
-            ..Default::default()
+            local_addr: LOCAL_ADDR.to_string(),
+            server_addr: SERVER_ADDR.to_string(),
+            password: PASSWORD.to_string(),
+            method: METHOD.to_string(),
         };
-        if config.local_addr.is_empty() {
-            config.local_addr = if let Ok(addr) = env::var("SHADOWSOCKS_LOCAL_ADDR") {
-                addr
-            } else {
-                LOCAL_ADDR.to_string()
-            }
+        if let Ok(addr) = env::var("SHADOWSOCKS_LOCAL_ADDR") {
+            config.local_addr = addr;
         }
-        if config.server_addr.is_empty() {
-            config.server_addr = if let Ok(addr) = env::var("SHADOWSOCKS_SERVER_ADDR") {
-                addr
-            } else {
-                SERVER_ADDR.to_string()
-            }
+        if let Ok(addr) = env::var("SHADOWSOCKS_SERVER_ADDR") {
+            config.server_addr = addr;
         }
-        if config.password.is_empty() {
-            config.password = if let Ok(addr) = env::var("SHADOWSOCKS_PASSWORD") {
-                addr
-            } else {
-                PASSWORD.to_string()
-            }
+        if let Ok(pass) = env::var("SHADOWSOCKS_PASSWORD") {
+            config.password = pass;
         }
-        if config.method.is_empty() {
-            config.method = if let Ok(addr) = env::var("SHADOWSOCKS_METHOD") {
-                addr
-            } else {
-                METHOD.to_string()
-            }
+        if let Ok(method) = env::var("SHADOWSOCKS_METHOD") {
+            config.method = method;
         }
         Ok(config)
     }
