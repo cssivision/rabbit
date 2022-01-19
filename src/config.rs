@@ -20,17 +20,17 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Config, io::Error> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Vec<Config>, io::Error> {
         if path.as_ref().exists() {
             let contents = fs::read_to_string(path)?;
-            let config = match serde_json::from_str(&contents) {
+            let configs: Vec<Config> = match serde_json::from_str(&contents) {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("{}", e);
                     return Err(io::Error::new(io::ErrorKind::Other, e));
                 }
             };
-            return Ok(config);
+            return Ok(configs);
         }
 
         let mut config = Config {
@@ -55,6 +55,6 @@ impl Config {
         if let Ok(unix_socket) = env::var("SHADOWSOCKS_UNIX_SOCKET") {
             config.method = unix_socket.parse().unwrap_or_default();
         }
-        Ok(config)
+        Ok(vec![config])
     }
 }
