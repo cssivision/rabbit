@@ -22,7 +22,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(configs: Vec<Config>) -> Server {
-        let services = configs.into_iter().map(|c| Service::new(c)).collect();
+        let services = configs.into_iter().map(Service::new).collect();
         Server { services }
     }
 
