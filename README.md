@@ -16,12 +16,14 @@ Fetch the [latest release](https://github.com/cssivision/shadowsocks-rs/releases
 # Configuration
 config.json
 ```json
-{
-	"server_addr": "0.0.0.0:9006",
-	"password": "password",
-	"local_addr": "0.0.0.0:6009",
-	"method": "aes-256-cfb"
-}
+[
+	{
+		"server_addr": "127.0.0.1:9006",
+		"password": "password",
+		"local_addr": "127.0.0.1:6009",
+		"method": "aes-128-cfb"
+	}
+]
 ```
 
 # Usage 
