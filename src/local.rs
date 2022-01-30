@@ -1,3 +1,4 @@
+use std::future::pending;
 use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -11,7 +12,6 @@ use crate::cipher::Cipher;
 use crate::config::Config;
 use crate::io::{copy_bidirectional, write_all};
 use crate::listener::Listener;
-use crate::pending;
 use crate::socks5::{
     self,
     v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
@@ -36,7 +36,7 @@ impl Server {
             })
             .detach();
         }
-        pending().await;
+        pending().await
     }
 }
 

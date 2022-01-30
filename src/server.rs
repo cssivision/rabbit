@@ -1,4 +1,5 @@
 #![allow(clippy::many_single_char_names)]
+use std::future::pending;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
@@ -11,7 +12,6 @@ use crate::cipher::Cipher;
 use crate::config::Config;
 use crate::io::{copy_bidirectional, read_exact};
 use crate::listener::Listener;
-use crate::pending;
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::util::other;
@@ -35,7 +35,7 @@ impl Server {
             })
             .detach();
         }
-        pending().await;
+        pending().await
     }
 }
 
