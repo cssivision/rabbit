@@ -12,6 +12,7 @@ use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 use slings::net::{TcpListener, TcpStream};
+use slings::{AsyncRead, AsyncWrite};
 
 fn main() -> io::Result<()> {
     env_logger::init();
@@ -21,11 +22,11 @@ fn main() -> io::Result<()> {
     slings::block_on(async {
         let listener = TcpListener::bind(&config.server_addr).await?;
         loop {
-            let (socket, addr) = listener.accept().await?;
+            let (mut socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);
-            let cipher = Rc::new(RefCell::new(cipher.reset()));
+            let cipher = cipher.reset();
             let proxy = async move {
-                if let Err(e) = proxy(cipher, socket).await {
+                if let Err(e) = proxy(cipher, &mut socket).await {
                     log::error!("failed to proxy; error={}", e);
                 };
             };
@@ -34,8 +35,12 @@ fn main() -> io::Result<()> {
     })
 }
 
-async fn proxy(cipher: Rc<RefCell<Cipher>>, mut socket1: TcpStream) -> io::Result<(u64, u64)> {
-    let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
+async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
+    let cipher = Rc::new(RefCell::new(cipher));
+    let (host, port) = get_addr_info(cipher.clone(), socket1).await?;
     log::debug!("proxy to address: {}:{}", host, port);
 
     let addr = resolve(&host).await?;
@@ -45,15 +50,15 @@ async fn proxy(cipher: Rc<RefCell<Cipher>>, mut socket1: TcpStream) -> io::Resul
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
-    let (n1, n2) = copy_bidirectional(&mut socket2, &mut socket1, cipher).await?;
+    let (n1, n2) = copy_bidirectional(&mut socket2, socket1, cipher).await?;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
 
-async fn get_addr_info(
-    cipher: Rc<RefCell<Cipher>>,
-    conn: &mut TcpStream,
-) -> io::Result<(String, u16)> {
+async fn get_addr_info<A>(cipher: Rc<RefCell<Cipher>>, conn: &mut A) -> io::Result<(String, u16)>
+where
+    A: AsyncRead + Unpin + ?Sized,
+{
     let address_type = &mut vec![0u8; 1];
     let _ = read_exact(cipher.clone(), conn, address_type).await?;
 
