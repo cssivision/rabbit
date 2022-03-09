@@ -20,7 +20,7 @@ fn main() -> io::Result<()> {
     log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
     let cipher = Cipher::new(&config.method, &config.password);
     slings::block_on(async {
-        let listener = TcpListener::bind(&config.server_addr).await?;
+        let listener = TcpListener::bind(&config.server_addr)?;
         loop {
             let (mut socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);

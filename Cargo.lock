@@ -101,9 +101,9 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.5"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fb3b00aee85e121e30172132c907736375cc50f1c6cf4524aa540346bf288ea"
+checksum = "ab75c57fe47fc7f57d0a18ebcb2851c01c5fb8835e9ca5a8aacc4425aa7609f5"
 dependencies = [
  "domain",
  "resolv-conf",
@@ -242,9 +242,9 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "libc"
-version = "0.2.101"
+version = "0.2.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb00336871be5ed2c8ed44b60ae9959dc5b9f08539422ed43f09e34ecaeba21"
+checksum = "1bf2e165bb3457c8e098ea76f3e3bc9db55f87aa90d52d0e6be741470916aaa4"
 
 [[package]]
 name = "log"
@@ -475,9 +475,9 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "slings"
-version = "0.3.5"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28761cd9965872e6ac57df21a9a660a9257a7bdcc5d0149749f3fcf8a6257b1a"
+checksum = "70859a4bea63a978392487618f70174adc13176f4ec41c00e357090f076294be"
 dependencies = [
  "async-task",
  "futures-util",
@@ -487,6 +487,17 @@ dependencies = [
  "pin-project-lite",
  "scoped-tls",
  "slab",
+ "socket2",
+]
+
+[[package]]
+name = "socket2"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66d72b759436ae32898a2af0a14218dbf55efde3feeb170eb623637db85ee1e0"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
