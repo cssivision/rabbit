@@ -286,16 +286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
-name = "os_socketaddr"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ff86dee67903f9ffcc3f09712b934761ace77cd34021848a474e7ed7199bd2"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "pin-project-lite"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -475,15 +465,14 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "slings"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d772103fe10e3da2e74a049f1dfa6e61c980ee9da5bb0e8aa3f3de6b4d48372a"
+checksum = "c1c81077fa6fd80bd9951f9f47b6f4ec96931c5f88dc00277912eff4b2323a8c"
 dependencies = [
  "async-task",
  "futures-util",
  "io-uring",
  "libc",
- "os_socketaddr",
  "pin-project-lite",
  "scoped-tls",
  "slab",
