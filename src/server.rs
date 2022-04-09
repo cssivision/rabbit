@@ -5,8 +5,8 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::sync::{Arc, Mutex};
 
-use awak::io::{AsyncRead, AsyncWrite};
 use awak::net::TcpStream;
+use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
 use crate::config::Config;

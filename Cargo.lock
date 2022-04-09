@@ -42,13 +42,14 @@ dependencies = [
 
 [[package]]
 name = "awak"
-version = "0.2.15"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f4530422b40fcd7037d0f175e6eac983d68a573bcb2469e6b1e9baefbf892cb"
+checksum = "e7578e51d26f1e548014a42987c337b9f89fb93e84737fe5e577af8243971022"
 dependencies = [
  "async-task",
  "cfg-if 0.1.10",
- "futures-util",
+ "futures-core",
+ "futures-io",
  "libc",
  "num_cpus",
  "once_cell",
@@ -119,12 +120,13 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.4"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6661514796631e0039e258769229410800db56de03ef4f75867296ee85ca33e2"
+checksum = "6f9f31d094d6af8719ae0bf5cd37eb138cfb9d4a0c8bdb557b5830bbbf8b41e4"
 dependencies = [
  "awak",
  "domain",
+ "futures-util",
  "resolv-conf",
 ]
 
@@ -152,30 +154,27 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79e5145dde8da7d1b3892dad07a9c98fc04bc39892b1ecc9692cf53e2b780a65"
+checksum = "0c09fd04b7e4073ac7156a9539b57a484a8ea920f79c7c675d05d289ab6110d3"
 
 [[package]]
 name = "futures-io"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28be053525281ad8259d47e4de5de657b25e7bac113458555bb4b70bc6870500"
+checksum = "fc4045962a5a5e935ee2fdedaa4e08284547402885ab326734432bed5d12966b"
 
 [[package]]
 name = "futures-task"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13de07eb8ea81ae445aca7b69f5f7bf15d7bf4912d8ca37d6645c77ae8a58d86"
-dependencies = [
- "once_cell",
-]
+checksum = "57c66a976bf5909d801bbef33416c41372779507e7a6b3a5e25e4749c58f776a"
 
 [[package]]
 name = "futures-util"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "632a8cd0f2a4b3fdea1657f08bde063848c3bd00f9bbf6e256b8be78802e624b"
+checksum = "d8b7abd5d659d9b90c8cba917f6ec750a74e2dc23902ef9cd4cc8c8b22e6036a"
 dependencies = [
  "futures-core",
  "futures-io",
@@ -459,6 +458,7 @@ dependencies = [
  "ctr",
  "dns-resolver",
  "env_logger",
+ "futures-util",
  "getopts",
  "log",
  "md5",

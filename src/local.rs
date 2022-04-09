@@ -5,8 +5,8 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use awak::io::{AsyncRead, AsyncWrite};
 use awak::net::TcpStream;
+use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
 use crate::config::Config;

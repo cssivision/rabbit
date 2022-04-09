@@ -4,8 +4,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;
 use std::time::Duration;
 
-use awak::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use awak::time::timeout;
+use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::util::other;
 

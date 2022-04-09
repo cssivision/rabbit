@@ -29,3 +29,4 @@ cfb-mode = "0.7"
 chacha20 = "0.7"
 ctr = "0.7"
 cipher = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["io"] }

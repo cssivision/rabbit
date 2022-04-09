@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use awak::io::AsyncWrite;
+use futures_util::AsyncWrite;
 
 use crate::cipher::Cipher;
 

@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use crate::cipher::Cipher;
 use crate::util::eof;
 
-use awak::io::AsyncRead;
+use futures_util::AsyncRead;
 
 enum State {
     Iv,

@@ -1,8 +1,8 @@
 use std::fs;
 use std::io;
 
-use awak::io::{AsyncRead, AsyncWrite};
 use awak::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+use futures_util::{AsyncRead, AsyncWrite};
 
 pub enum Listener {
     Tcp(TcpListener),
