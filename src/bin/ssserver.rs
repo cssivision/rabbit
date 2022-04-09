@@ -5,6 +5,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::str;
 
+use futures_util::{AsyncRead, AsyncWrite};
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, read_exact};
@@ -12,7 +13,6 @@ use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 use slings::net::{TcpListener, TcpStream};
-use slings::{AsyncRead, AsyncWrite};
 
 fn main() -> io::Result<()> {
     env_logger::init();

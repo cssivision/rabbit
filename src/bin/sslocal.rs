@@ -5,13 +5,13 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Duration;
 
+use futures_util::{AsyncRead, AsyncWrite};
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
 use shadowsocks::io::{copy_bidirectional, write_all};
 use shadowsocks::socks5;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use slings::net::{TcpListener, TcpStream};
-use slings::{AsyncRead, AsyncWrite};
 
 fn main() -> io::Result<()> {
     env_logger::init();

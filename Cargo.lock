@@ -101,11 +101,12 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab75c57fe47fc7f57d0a18ebcb2851c01c5fb8835e9ca5a8aacc4425aa7609f5"
+checksum = "1c2096041ab432a103a7b060f5687b95c5a4f8267d70a4f1a8e13ff3fa3d5562"
 dependencies = [
  "domain",
+ "futures-util",
  "resolv-conf",
  "slings",
 ]
@@ -134,30 +135,27 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79e5145dde8da7d1b3892dad07a9c98fc04bc39892b1ecc9692cf53e2b780a65"
+checksum = "0c09fd04b7e4073ac7156a9539b57a484a8ea920f79c7c675d05d289ab6110d3"
 
 [[package]]
 name = "futures-io"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28be053525281ad8259d47e4de5de657b25e7bac113458555bb4b70bc6870500"
+checksum = "fc4045962a5a5e935ee2fdedaa4e08284547402885ab326734432bed5d12966b"
 
 [[package]]
 name = "futures-task"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13de07eb8ea81ae445aca7b69f5f7bf15d7bf4912d8ca37d6645c77ae8a58d86"
-dependencies = [
- "once_cell",
-]
+checksum = "57c66a976bf5909d801bbef33416c41372779507e7a6b3a5e25e4749c58f776a"
 
 [[package]]
 name = "futures-util"
-version = "0.3.12"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "632a8cd0f2a4b3fdea1657f08bde063848c3bd00f9bbf6e256b8be78802e624b"
+checksum = "d8b7abd5d659d9b90c8cba917f6ec750a74e2dc23902ef9cd4cc8c8b22e6036a"
 dependencies = [
  "futures-core",
  "futures-io",
@@ -446,6 +444,7 @@ dependencies = [
  "ctr",
  "dns-resolver",
  "env_logger",
+ "futures-util",
  "getopts",
  "log",
  "md5",
@@ -465,12 +464,13 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "slings"
-version = "0.3.11"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1c81077fa6fd80bd9951f9f47b6f4ec96931c5f88dc00277912eff4b2323a8c"
+checksum = "a7da8c951887734b0db429164e0c48bee1dc53c6a73e23421d1e36003b784460"
 dependencies = [
  "async-task",
- "futures-util",
+ "futures-core",
+ "futures-io",
  "io-uring",
  "libc",
  "pin-project-lite",

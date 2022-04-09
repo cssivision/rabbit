@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
-use slings::AsyncWrite;
+use futures_util::AsyncWrite;
 
 use crate::cipher::Cipher;
 
