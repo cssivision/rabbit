@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Duration;
@@ -26,7 +26,7 @@ fn main() -> io::Result<()> {
             let _ = socket.set_nodelay(true);
             log::debug!("accept tcp stream from addr {:?}", addr);
             let cipher = cipher.reset();
-            let server_addr = config.server_addr.clone();
+            let server_addr = config.server_addr;
             let proxy = async move {
                 if let Err(e) = proxy(server_addr, cipher, &mut socket).await {
                     log::error!("failed to proxy; error={}", e);
@@ -37,7 +37,11 @@ fn main() -> io::Result<()> {
     })
 }
 
-async fn proxy<A>(server_addr: String, cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
+async fn proxy<A>(
+    server_addr: SocketAddr,
+    cipher: Cipher,
+    socket1: &mut A,
+) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
