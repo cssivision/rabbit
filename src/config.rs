@@ -1,60 +1,42 @@
-use std::env;
-use std::path::Path;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use serde_derive::{Deserialize, Serialize};
 
-static LOCAL_ADDR: &str = "0.0.0.0:6009";
-static SERVER_ADDR: &str = "0.0.0.0:9006";
-static PASSWORD: &str = "password";
-static METHOD: &str = "aes-256-cfb";
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-#[serde(default)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
-    pub local_addr: String,
-    pub server_addr: String,
+    pub server: Vec<Server>,
+    pub client: Vec<Client>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Server {
+    pub local_addr: Addr,
     pub password: String,
     pub method: String,
-    pub unix_socket: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Client {
+    pub local_addr: Addr,
+    pub server_addr: SocketAddr,
+    pub password: String,
+    pub method: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum Addr {
+    Socket(SocketAddr),
+    Path(PathBuf),
 }
 
 impl Config {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Vec<Config>, io::Error> {
-        if path.as_ref().exists() {
-            let contents = fs::read_to_string(path)?;
-            let configs: Vec<Config> = match serde_json::from_str(&contents) {
-                Ok(c) => c,
-                Err(e) => {
-                    log::error!("{}", e);
-                    return Err(io::Error::new(io::ErrorKind::Other, e));
-                }
-            };
-            return Ok(configs);
-        }
-
-        let mut config = Config {
-            local_addr: LOCAL_ADDR.to_string(),
-            server_addr: SERVER_ADDR.to_string(),
-            password: PASSWORD.to_string(),
-            method: METHOD.to_string(),
-            unix_socket: false,
-        };
-        if let Ok(addr) = env::var("SHADOWSOCKS_LOCAL_ADDR") {
-            config.local_addr = addr;
-        }
-        if let Ok(addr) = env::var("SHADOWSOCKS_SERVER_ADDR") {
-            config.server_addr = addr;
-        }
-        if let Ok(pass) = env::var("SHADOWSOCKS_PASSWORD") {
-            config.password = pass;
-        }
-        if let Ok(method) = env::var("SHADOWSOCKS_METHOD") {
-            config.method = method;
-        }
-        if let Ok(unix_socket) = env::var("SHADOWSOCKS_UNIX_SOCKET") {
-            config.method = unix_socket.parse().unwrap_or_default();
-        }
-        Ok(vec![config])
+    pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Config> {
+        let contents = fs::read_to_string(path)?;
+        let config: Config =
+            toml::from_str(&contents).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        return Ok(config);
     }
 }

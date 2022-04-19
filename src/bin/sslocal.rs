@@ -3,10 +3,10 @@ use shadowsocks::local::Server;
 
 fn main() {
     env_logger::init();
-    let configs = parse_args("sslocal").unwrap();
-    log::info!("{}", serde_json::to_string_pretty(&configs).unwrap());
+    let config = parse_args("sslocal").unwrap();
+    log::info!("{}", toml::ser::to_string_pretty(&config).unwrap());
 
-    let server = Server::new(configs);
+    let server = Server::new(config.client);
     awak::block_on(async {
         server.serve().await;
     })

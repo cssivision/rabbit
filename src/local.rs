@@ -1,6 +1,6 @@
 use std::future::pending;
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use awak::net::TcpStream;
 use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
-use crate::config::Config;
+use crate::config;
 use crate::io::{copy_bidirectional, write_all};
 use crate::listener::Listener;
 use crate::socks5::{
@@ -22,7 +22,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(configs: Vec<Config>) -> Server {
+    pub fn new(configs: Vec<config::Client>) -> Server {
         let services = configs.into_iter().map(Service::new).collect();
         Server { services }
     }
@@ -41,22 +41,23 @@ impl Server {
 }
 
 pub struct Service {
-    config: Config,
+    config: config::Client,
 }
 
 impl Service {
-    pub fn new(config: Config) -> Service {
+    pub fn new(config: config::Client) -> Service {
         Service { config }
     }
 
     pub async fn serve(&self) -> io::Result<()> {
         let cipher = Cipher::new(&self.config.method, &self.config.password);
-        let listener = Listener::bind(&self.config.local_addr, self.config.unix_socket).await?;
-        log::info!("listening connections on {}", self.config.local_addr);
+        let local_addr = self.config.local_addr.clone();
+        let listener = Listener::bind(local_addr).await?;
+        log::info!("listening connections on {:?}", self.config.local_addr);
         loop {
             let mut socket = listener.accept().await?;
             let cipher = cipher.reset();
-            let server_addr = self.config.server_addr.clone();
+            let server_addr = self.config.server_addr;
             let proxy = async move {
                 if let Err(e) = proxy(server_addr, cipher, &mut socket).await {
                     log::error!("failed to proxy; error={}", e);
@@ -67,7 +68,11 @@ impl Service {
     }
 }
 
-async fn proxy<A>(server_addr: String, cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
+async fn proxy<A>(
+    server_addr: SocketAddr,
+    cipher: Cipher,
+    socket1: &mut A,
+) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {

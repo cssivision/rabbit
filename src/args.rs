@@ -5,7 +5,7 @@ use crate::config::Config;
 
 use getopts::Options;
 
-pub fn parse_args(name: &str) -> Option<Vec<Config>> {
+pub fn parse_args(name: &str) -> Option<Config> {
     let args: Vec<String> = env::args().collect();
 
     let mut opts = Options::new();

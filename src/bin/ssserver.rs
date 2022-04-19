@@ -4,10 +4,10 @@ use shadowsocks::server::Server;
 fn main() {
     env_logger::init();
 
-    let configs = parse_args("ssserver").expect("invalid config");
-    log::info!("{}", serde_json::to_string_pretty(&configs).unwrap());
+    let config = parse_args("ssserver").expect("invalid config");
+    log::info!("{}", toml::ser::to_string_pretty(&config).unwrap());
 
-    let server = Server::new(configs);
+    let server = Server::new(config.server);
     awak::block_on(async {
         server.serve().await;
     })

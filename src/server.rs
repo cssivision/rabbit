@@ -9,7 +9,7 @@ use awak::net::TcpStream;
 use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
-use crate::config::Config;
+use crate::config;
 use crate::io::{copy_bidirectional, read_exact};
 use crate::listener::Listener;
 use crate::resolver::resolve;
@@ -21,7 +21,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(configs: Vec<Config>) -> Server {
+    pub fn new(configs: Vec<config::Server>) -> Server {
         let services = configs.into_iter().map(Service::new).collect();
         Server { services }
     }
@@ -40,18 +40,18 @@ impl Server {
 }
 
 pub struct Service {
-    config: Config,
+    config: config::Server,
 }
 
 impl Service {
-    pub fn new(config: Config) -> Service {
+    pub fn new(config: config::Server) -> Service {
         Service { config }
     }
 
     pub async fn serve(&self) -> io::Result<()> {
         let cipher = Cipher::new(&self.config.method, &self.config.password);
-        let listener = Listener::bind(&self.config.server_addr, self.config.unix_socket).await?;
-        log::info!("listening connections on {}", self.config.server_addr);
+        let listener = Listener::bind(self.config.local_addr.clone()).await?;
+        log::info!("listening connections on {:?}", self.config.local_addr);
         loop {
             let mut socket = listener.accept().await?;
             let cipher = cipher.reset();

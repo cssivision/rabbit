@@ -4,6 +4,8 @@ use std::io;
 use awak::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use futures_util::{AsyncRead, AsyncWrite};
 
+use crate::config;
+
 pub enum Listener {
     Tcp(TcpListener),
     Unix(UnixListener),
@@ -16,12 +18,13 @@ impl AsyncReadWrite for TcpStream {}
 impl AsyncReadWrite for UnixStream {}
 
 impl Listener {
-    pub async fn bind(addr: &str, unix_socket: bool) -> io::Result<Listener> {
-        if unix_socket {
-            let _ = fs::remove_file(&addr);
-            Ok(Listener::Unix(UnixListener::bind(addr)?))
-        } else {
-            Ok(Listener::Tcp(TcpListener::bind(addr).await?))
+    pub async fn bind(addr: config::Addr) -> io::Result<Listener> {
+        match addr {
+            config::Addr::Path(addr) => {
+                let _ = fs::remove_file(&addr);
+                Ok(Listener::Unix(UnixListener::bind(addr)?))
+            }
+            config::Addr::Socket(addr) => Ok(Listener::Tcp(TcpListener::bind(addr).await?)),
         }
     }
 
