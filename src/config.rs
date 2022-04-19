@@ -15,8 +15,6 @@ pub struct Config {
 impl Config {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Config, io::Error> {
         let contents = fs::read_to_string(path)?;
-        let config =
-            toml::from_str(&contents).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        return Ok(config);
+        toml::from_str(&contents).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 }
