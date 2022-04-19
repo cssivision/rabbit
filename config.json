@@ -1,6 +1,0 @@
-{
-	"server_addr": "127.0.0.1:9007",
-	"password": "password",
-	"local_addr": "127.0.0.1:6010",
-	"method": "aes-256-cfb"
-}

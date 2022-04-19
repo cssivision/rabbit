@@ -14,20 +14,18 @@ cargo install shadowsocks-rs
 ```
 Fetch the [latest release](https://github.com/cssivision/shadowsocks-rs/releases).
 # Configuration
-config.json
-```json
-{
-	"server_addr": "0.0.0.0:9006",
-	"password": "password",
-	"local_addr": "0.0.0.0:6009",
-	"method": "aes-256-cfb"
-}
+config.toml
+```toml
+server_addr = "127.0.0.1:9007"
+password = "password"
+local_addr = "127.0.0.1:6010"
+method = "aes-256-cfb"
 ```
 
 # Usage 
 #### server
 ```sh
-RUST_LOG=info ssserver -c config.json
+RUST_LOG=info ssserver -c config.toml
 ```
 
 install a [client](https://shadowsocks.org/en/download/clients.html), connect to your server using your configuration, Done!

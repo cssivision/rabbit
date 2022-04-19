@@ -16,7 +16,7 @@ use slings::net::{TcpListener, TcpStream};
 fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
-    log::info!("{}", serde_json::to_string_pretty(&config).unwrap());
+    log::info!("{}", toml::ser::to_string_pretty(&config).unwrap());
     slings::block_on(async {
         let listener = TcpListener::bind(&config.local_addr)?;
         log::info!("listening connections on {}", config.local_addr);

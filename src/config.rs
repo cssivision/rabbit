@@ -10,7 +10,6 @@ static PASSWORD: &str = "password";
 static METHOD: &str = "aes-256-cfb";
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-#[serde(default)]
 pub struct Config {
     pub local_addr: String,
     pub server_addr: String,
@@ -22,7 +21,7 @@ impl Config {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Config, io::Error> {
         if path.as_ref().exists() {
             let contents = fs::read_to_string(path)?;
-            let config = match serde_json::from_str(&contents) {
+            let config = match toml::from_str(&contents) {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("{}", e);
