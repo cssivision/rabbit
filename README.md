@@ -17,13 +17,13 @@ Fetch the [latest release](https://github.com/cssivision/shadowsocks-rs/releases
 config.toml
 ```json
 [[server]]
-local_addr = "127.0.0.1:9006",
-password = "password",
+local_addr = "127.0.0.1:9006"
+password = "password"
 method = "aes-128-cfb"
 
 [[server]]
-local_addr = "temp.sock",
-password = "password",
+local_addr = "temp.sock"
+password = "password"
 method = "aes-128-cfb"
 ```
 
