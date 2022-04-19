@@ -15,7 +15,7 @@ cargo install shadowsocks-rs
 Fetch the [latest release](https://github.com/cssivision/shadowsocks-rs/releases).
 # Configuration
 config.toml
-```json
+```toml
 [[server]]
 local_addr = "127.0.0.1:9006"
 password = "password"
