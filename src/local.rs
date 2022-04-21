@@ -10,7 +10,7 @@ use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
 use crate::config;
-use crate::io::{copy_bidirectional, write_all};
+use crate::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
 use crate::socks5::{
     self,
@@ -87,7 +87,11 @@ where
     let rawaddr = generate_raw_addr(&host, port);
     write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
 
-    let (n1, n2) = copy_bidirectional(socket1, &mut socket2, cipher).await?;
+    let (n1, n2) = IdleTimeout::new(
+        copy_bidirectional(socket1, &mut socket2, cipher),
+        DEFAULT_IDLE_TIMEOUT,
+    )
+    .await??;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
     Ok((n1, n2))
 }
