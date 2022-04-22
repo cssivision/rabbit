@@ -23,7 +23,10 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("ssserver").expect("invalid config");
-    log::info!("{}", toml::ser::to_string_pretty(&config).unwrap());
+    log::info!(
+        "config: \n{}",
+        toml::ser::to_string_pretty(&config).unwrap()
+    );
     let cipher = Cipher::new(&config.method, &config.password);
     slings::block_on(async {
         let listener = TcpListener::bind(&config.server_addr)?;

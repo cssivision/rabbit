@@ -19,7 +19,10 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
-    log::info!("{}", toml::ser::to_string_pretty(&config).unwrap());
+    log::info!(
+        "config: \n{}",
+        toml::ser::to_string_pretty(&config).unwrap()
+    );
     slings::block_on(async {
         let listener = TcpListener::bind(&config.local_addr)?;
         log::info!("listening connections on {}", config.local_addr);
