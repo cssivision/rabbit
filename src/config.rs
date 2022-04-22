@@ -6,8 +6,8 @@ use serde_derive::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
-    pub server: Vec<Server>,
-    pub client: Vec<Client>,
+    pub server: Option<Vec<Server>>,
+    pub client: Option<Vec<Client>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

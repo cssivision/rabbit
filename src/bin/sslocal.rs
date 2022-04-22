@@ -4,9 +4,12 @@ use shadowsocks::local::Server;
 fn main() {
     env_logger::init();
     let config = parse_args("sslocal").unwrap();
-    log::info!("{}", toml::ser::to_string_pretty(&config).unwrap());
+    log::info!(
+        "config: \n{}",
+        toml::ser::to_string_pretty(&config).unwrap()
+    );
 
-    let server = Server::new(config.client);
+    let server = Server::new(config.client.unwrap());
     awak::block_on(async {
         server.serve().await;
     })
