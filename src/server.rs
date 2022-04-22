@@ -4,8 +4,10 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use awak::net::TcpStream;
+use awak::time::timeout;
 use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
@@ -15,6 +17,10 @@ use crate::listener::Listener;
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::util::other;
+
+const DEFAULT_GET_ADDR_INFO_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_RESLOVE_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct Server {
     services: Vec<Service>,
@@ -70,13 +76,21 @@ where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     let cipher = Arc::new(Mutex::new(cipher));
-    let (host, port) = get_addr_info(cipher.clone(), socket1).await?;
+    let (host, port) = timeout(
+        DEFAULT_GET_ADDR_INFO_TIMEOUT,
+        get_addr_info(cipher.clone(), socket1),
+    )
+    .await??;
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let addr = resolve(&host).await?;
+    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
     log::debug!("resolver addr to ip: {}", addr);
 
-    let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
+    let mut socket2 = timeout(
+        DEFAULT_CONNECT_TIMEOUT,
+        TcpStream::connect(&SocketAddr::new(addr, port)),
+    )
+    .await??;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 

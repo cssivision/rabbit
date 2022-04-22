@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use awak::net::TcpStream;
+use awak::time::timeout;
 use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
@@ -16,6 +17,8 @@ use crate::socks5::{
     self,
     v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
 };
+
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct Server {
     services: Vec<Service>,
@@ -81,7 +84,7 @@ where
     let (host, port) = socks5::handshake(socket1, Duration::from_secs(3)).await?;
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let mut socket2 = TcpStream::connect(&server_addr).await?;
+    let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
 
     let rawaddr = generate_raw_addr(&host, port);
