@@ -8,7 +8,7 @@ use std::str;
 use futures_util::{AsyncRead, AsyncWrite};
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
-use shadowsocks::io::{copy_bidirectional, read_exact};
+use shadowsocks::io::{copy_bidirectional, read_exact, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
 use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
@@ -50,7 +50,11 @@ where
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
-    let (n1, n2) = copy_bidirectional(&mut socket2, socket1, cipher).await?;
+    let (n1, n2) = IdleTimeout::new(
+        copy_bidirectional(&mut socket2, socket1, cipher),
+        DEFAULT_IDLE_TIMEOUT,
+    )
+    .await??;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }

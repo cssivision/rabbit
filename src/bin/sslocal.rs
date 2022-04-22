@@ -8,7 +8,7 @@ use std::time::Duration;
 use futures_util::{AsyncRead, AsyncWrite};
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
-use shadowsocks::io::{copy_bidirectional, write_all};
+use shadowsocks::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
 use shadowsocks::socks5;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use slings::net::{TcpListener, TcpStream};
@@ -56,7 +56,11 @@ where
     let rawaddr = generate_raw_addr(&host, port);
     write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
 
-    let (n1, n2) = copy_bidirectional(socket1, &mut socket2, cipher).await?;
+    let (n1, n2) = IdleTimeout::new(
+        copy_bidirectional(socket1, &mut socket2, cipher),
+        DEFAULT_IDLE_TIMEOUT,
+    )
+    .await??;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
     Ok((n1, n2))
 }
