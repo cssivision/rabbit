@@ -1,7 +1,3 @@
-pub use crate::copy::copy_bidirectional;
-pub use crate::read_exact::read_exact;
-pub use crate::write_all::write_all;
-
 use std::future::Future;
 use std::io;
 use std::ops::{Add, Sub};
@@ -12,13 +8,18 @@ use std::time::{Duration, Instant};
 use awak::time::{delay_for, Delay};
 use pin_project_lite::pin_project;
 
+pub use crate::copy::copy_bidirectional;
+pub use crate::read_exact::read_exact;
+pub use crate::write_all::write_all;
+
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const DEFAULT_VISITED_GAP: Duration = Duration::from_secs(3);
 
 pin_project! {
     /// A future with timeout time set
     pub struct IdleTimeout<S: Future> {
         #[pin]
-        pub inner: S,
+        inner: S,
         delay: Delay,
         idle_timeout: Duration,
         last_visited: Instant,
@@ -50,7 +51,7 @@ impl<S: Future> Future for IdleTimeout<S> {
                 Poll::Ready(_) => Poll::Ready(Err(io::ErrorKind::TimedOut.into())),
                 Poll::Pending => {
                     let now = Instant::now();
-                    if now.sub(*this.last_visited) >= Duration::from_secs(5) {
+                    if now.sub(*this.last_visited) >= DEFAULT_VISITED_GAP {
                         *this.last_visited = now;
                         this.delay.reset(now.add(*this.idle_timeout));
                     }
