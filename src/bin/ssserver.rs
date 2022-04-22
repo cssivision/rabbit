@@ -4,6 +4,7 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::str;
+use std::time::Duration;
 
 use futures_util::{AsyncRead, AsyncWrite};
 use shadowsocks::args::parse_args;
@@ -13,6 +14,7 @@ use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 use slings::net::{TcpListener, TcpStream};
+use slings::time::timeout;
 
 fn main() -> io::Result<()> {
     env_logger::init();
@@ -40,13 +42,21 @@ where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     let cipher = Rc::new(RefCell::new(cipher));
-    let (host, port) = get_addr_info(cipher.clone(), socket1).await?;
+    let (host, port) = timeout(
+        Duration::from_secs(1),
+        get_addr_info(cipher.clone(), socket1),
+    )
+    .await??;
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let addr = resolve(&host).await?;
+    let addr = timeout(Duration::from_secs(1), resolve(&host)).await??;
     log::debug!("resolver addr to ip: {}", addr);
 
-    let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
+    let mut socket2 = timeout(
+        Duration::from_secs(1),
+        TcpStream::connect(&SocketAddr::new(addr, port)),
+    )
+    .await??;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
