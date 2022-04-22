@@ -16,6 +16,10 @@ use shadowsocks::util::other;
 use slings::net::{TcpListener, TcpStream};
 use slings::time::timeout;
 
+const DEFAULT_GET_ADDR_INFO_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_RESLOVE_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+
 fn main() -> io::Result<()> {
     env_logger::init();
     let config = parse_args("ssserver").expect("invalid config");
@@ -43,17 +47,17 @@ where
 {
     let cipher = Rc::new(RefCell::new(cipher));
     let (host, port) = timeout(
-        Duration::from_secs(1),
+        DEFAULT_GET_ADDR_INFO_TIMEOUT,
         get_addr_info(cipher.clone(), socket1),
     )
     .await??;
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let addr = timeout(Duration::from_secs(1), resolve(&host)).await??;
+    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
     log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = timeout(
-        Duration::from_secs(1),
+        DEFAULT_CONNECT_TIMEOUT,
         TcpStream::connect(&SocketAddr::new(addr, port)),
     )
     .await??;

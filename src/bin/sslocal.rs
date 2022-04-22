@@ -12,6 +12,9 @@ use shadowsocks::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_T
 use shadowsocks::socks5;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use slings::net::{TcpListener, TcpStream};
+use slings::time::timeout;
+
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn main() -> io::Result<()> {
     env_logger::init();
@@ -50,7 +53,7 @@ where
 
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let mut socket2 = TcpStream::connect(&server_addr).await?;
+    let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
 
     let rawaddr = generate_raw_addr(&host, port);
