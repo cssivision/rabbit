@@ -3,15 +3,21 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use shadowsocks::args::parse_args;
 use shadowsocks::cipher::Cipher;
-use shadowsocks::io::{copy_bidirectional, read_exact};
+use shadowsocks::io::{copy_bidirectional, read_exact, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
 use shadowsocks::resolver::resolve;
 use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use shadowsocks::util::other;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
+use tokio::time::timeout;
+
+const DEFAULT_GET_ADDR_INFO_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_RESLOVE_TIMEOUT: Duration = Duration::from_secs(1);
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn main() -> io::Result<()> {
     env_logger::init();
@@ -37,17 +43,29 @@ fn main() -> io::Result<()> {
 }
 
 async fn proxy(cipher: Arc<Mutex<Cipher>>, mut socket1: TcpStream) -> io::Result<(u64, u64)> {
-    let (host, port) = get_addr_info(cipher.clone(), &mut socket1).await?;
+    let (host, port) = timeout(
+        DEFAULT_GET_ADDR_INFO_TIMEOUT,
+        get_addr_info(cipher.clone(), &mut socket1),
+    )
+    .await??;
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let addr = resolve(&host).await?;
+    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
     log::debug!("resolver addr to ip: {}", addr);
 
-    let mut socket2 = TcpStream::connect(&SocketAddr::new(addr, port)).await?;
+    let mut socket2 = timeout(
+        DEFAULT_CONNECT_TIMEOUT,
+        TcpStream::connect(&SocketAddr::new(addr, port)),
+    )
+    .await??;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
-    let (n1, n2) = copy_bidirectional(&mut socket2, &mut socket1, cipher).await?;
+    let (n1, n2) = IdleTimeout::new(
+        copy_bidirectional(&mut socket2, &mut socket1, cipher),
+        DEFAULT_IDLE_TIMEOUT,
+    )
+    .await??;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }

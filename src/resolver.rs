@@ -14,10 +14,7 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
         return Ok(addr);
     }
 
-    let results = GLOBAL_RESOLVER
-        .lookup_host(host)
-        .await
-        .map_err(|e| other(&e.to_string()))?;
+    let results = GLOBAL_RESOLVER.lookup_host(host).await?;
 
     if !results.is_empty() {
         return Ok(results[0]);

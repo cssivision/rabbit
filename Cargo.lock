@@ -497,6 +497,7 @@ dependencies = [
  "log",
  "md5",
  "once_cell",
+ "pin-project-lite",
  "rand",
  "serde",
  "serde_derive",
