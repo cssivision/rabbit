@@ -120,13 +120,14 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f9f31d094d6af8719ae0bf5cd37eb138cfb9d4a0c8bdb557b5830bbbf8b41e4"
+checksum = "7f771e5fb8ed52e2bffcb2e2bd0ca862494dbb8eaec5a73284a9a2f1a213b17a"
 dependencies = [
  "awak",
  "domain",
  "futures-util",
+ "lru_time_cache",
  "resolv-conf",
 ]
 
@@ -255,6 +256,12 @@ checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
 dependencies = [
  "cfg-if 1.0.0",
 ]
+
+[[package]]
+name = "lru_time_cache"
+version = "0.11.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9106e1d747ffd48e6be5bb2d97fa706ed25b144fbee4d5c02eae110cd8d6badd"
 
 [[package]]
 name = "match_cfg"
