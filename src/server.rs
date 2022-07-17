@@ -178,7 +178,7 @@ async fn proxy_packet(
     let socket = UdpSocket::bind(&local)?;
     socket.connect(peer_addr)?;
     let _ = socket.send(&buf).await?;
-    let mut recv_buf = vec![0u8; 65536];
+    let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
     let n = socket.recv(&mut recv_buf).await?;
     recv_buf.truncate(n);
 
@@ -187,7 +187,9 @@ async fn proxy_packet(
         cipher.lock().unwrap().init_encrypt();
     }
     cipher.lock().unwrap().encrypt(&mut recv_buf);
-    sender.try_send((recv_buf.to_vec(), peer_addr)).unwrap();
+    sender
+        .try_send((recv_buf.to_vec(), peer_addr))
+        .map_err(|e| other(&format!("send fail: {}", e)))?;
     Ok((buf.len() as u64, n as u64))
 }
 
