@@ -32,3 +32,6 @@ cipher = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 pin-project-lite = "0.2"
 async-channel = "1.6"
+libc = "0.2.126"
+socket2 = "0.4"
+

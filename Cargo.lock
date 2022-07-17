@@ -55,7 +55,7 @@ dependencies = [
 name = "awak"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7578e51d26f1e548014a42987c337b9f89fb93e84737fe5e577af8243971022"
+checksum = "e9935462109f2461a40cd122b809e35c45bc3fa70f3ccc1cd7db5df116dd634a"
 dependencies = [
  "async-task",
  "cfg-if 0.1.10",
@@ -276,9 +276,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "libc"
-version = "0.2.97"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12b8adadd720df158f4d70dfe7ccc6adb0472d7c55ca83445f6a5ab3e36f8fb6"
+checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 
 [[package]]
 name = "log"
@@ -476,6 +476,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "getopts",
+ "libc",
  "log",
  "md5",
  "once_cell",
@@ -483,6 +484,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_derive",
+ "socket2",
  "toml",
 ]
 
