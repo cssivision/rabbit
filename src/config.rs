@@ -8,6 +8,15 @@ use serde_derive::{Deserialize, Serialize};
 pub struct Config {
     pub server: Option<Vec<Server>>,
     pub client: Option<Vec<Client>>,
+    pub redir: Option<Vec<Client>>,
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+pub enum Mode {
+    #[default]
+    Tcp,
+    Udp,
+    Both,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -15,6 +24,8 @@ pub struct Server {
     pub local_addr: Addr,
     pub password: String,
     pub method: String,
+    #[serde(default)]
+    pub mode: Mode,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

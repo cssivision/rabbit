@@ -2,16 +2,21 @@
 use std::future::pending;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::pin::Pin;
 use std::str;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
-use awak::net::TcpStream;
+use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
-use futures_util::{AsyncRead, AsyncWrite};
+use futures_util::{
+    future::{join, poll_fn},
+    AsyncRead, AsyncWrite, Stream,
+};
 
 use crate::cipher::Cipher;
-use crate::config;
+use crate::config::{self, Addr, Mode};
 use crate::io::{copy_bidirectional, read_exact, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
 use crate::resolver::resolve;
@@ -21,6 +26,7 @@ use crate::util::other;
 const DEFAULT_GET_ADDR_INFO_TIMEOUT: Duration = Duration::from_secs(1);
 const DEFAULT_RESLOVE_TIMEOUT: Duration = Duration::from_secs(1);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_UDP_BUFFER_SIZE: usize = 65536;
 
 pub struct Server {
     services: Vec<Service>,
@@ -54,10 +60,10 @@ impl Service {
         Service { config }
     }
 
-    pub async fn serve(&self) -> io::Result<()> {
+    pub async fn serve_stream(&self) -> io::Result<()> {
         let cipher = Cipher::new(&self.config.method, &self.config.password);
         let listener = Listener::bind(self.config.local_addr.clone()).await?;
-        log::info!("listening connections on {:?}", self.config.local_addr);
+        log::info!("listening tcp on {:?}", self.config.local_addr);
         loop {
             let mut socket = listener.accept().await?;
             let cipher = cipher.reset();
@@ -69,6 +75,120 @@ impl Service {
             awak::spawn(proxy).detach();
         }
     }
+
+    pub async fn serve(&self) -> io::Result<()> {
+        match self.config.mode {
+            Mode::Tcp => self.serve_stream().await,
+            Mode::Udp => self.serve_packet().await,
+            Mode::Both => {
+                let fut1 = self.serve_stream();
+                let fut2 = self.serve_packet();
+                let _ = join(fut1, fut2).await;
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn serve_packet(&self) -> io::Result<()> {
+        let cipher = Cipher::new(&self.config.method, &self.config.password);
+        let addr = match &self.config.local_addr {
+            Addr::Path(addr) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid local_addr {:?}", addr),
+                ));
+            }
+            Addr::Socket(addr) => addr,
+        };
+
+        let socket = UdpSocket::bind(addr)?;
+        log::info!("listening udp on {:?}", self.config.local_addr);
+        let mut buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
+        let (sender, mut receiver) = async_channel::unbounded::<(Vec<u8>, SocketAddr)>();
+        let mut recv: Option<(Vec<u8>, SocketAddr)> = None;
+        poll_fn(|cx| loop {
+            match socket.poll_recv_from(cx, &mut buf) {
+                Poll::Pending => {
+                    if let Some((data, peer_addr)) = recv.take() {
+                        match socket.poll_send_to(cx, &data, peer_addr) {
+                            Poll::Pending => {
+                                recv = Some((data, peer_addr));
+                                return Poll::Pending;
+                            }
+                            Poll::Ready(_) => {}
+                        }
+                    }
+                    while let Some((data, peer_addr)) =
+                        ready!(Pin::new(&mut receiver).poll_next(cx))
+                    {
+                        match socket.poll_send_to(cx, &data, peer_addr) {
+                            Poll::Pending => {
+                                recv = Some((data, peer_addr));
+                                return Poll::Pending;
+                            }
+                            Poll::Ready(_) => {}
+                        }
+                    }
+                }
+                Poll::Ready(v) => {
+                    let (n, peer_addr) = v?;
+                    log::info!("recv {} byte from {:?}", n, peer_addr);
+                    let mut req_buf = vec![0u8; n];
+                    req_buf.copy_from_slice(&buf[..n]);
+                    let cipher = cipher.reset();
+                    let sender = sender.clone();
+                    awak::spawn(async move {
+                        if let Err(e) = proxy_packet(cipher, req_buf, peer_addr, sender).await {
+                            log::error!("failed to proxy; error={}", e);
+                        };
+                    })
+                    .detach();
+                }
+            }
+        })
+        .await
+    }
+}
+
+async fn proxy_packet(
+    cipher: Cipher,
+    mut buf: Vec<u8>,
+    peer_addr: SocketAddr,
+    sender: async_channel::Sender<(Vec<u8>, SocketAddr)>,
+) -> io::Result<(u64, u64)> {
+    let cipher = Arc::new(Mutex::new(cipher));
+
+    // get host and port.
+    let (host, port) = get_addr_info(cipher.clone(), &mut buf.as_slice()).await?;
+    log::debug!("proxy to address: {}:{}", host, port);
+
+    // resolver host if need.
+    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
+    log::debug!("resolver addr to ip: {}", addr);
+    let local: SocketAddr = if addr.is_ipv4() {
+        ([0u8; 4], 0).into()
+    } else {
+        ([0u16; 8], 0).into()
+    };
+
+    // decrypt recv data, dec already init in get_addr_info() function.
+    cipher.lock().unwrap().decrypt(&mut buf);
+
+    // send to and recv from target.
+    let socket = UdpSocket::bind(&local)?;
+    socket.connect(peer_addr)?;
+    let _ = socket.send(&buf).await?;
+    let mut recv_buf = vec![0u8; 65536];
+    let n = socket.recv(&mut recv_buf).await?;
+    recv_buf.truncate(n);
+
+    // encrypt return data.
+    if !cipher.lock().unwrap().is_encrypt_inited() {
+        cipher.lock().unwrap().init_encrypt();
+    }
+    cipher.lock().unwrap().encrypt(&mut recv_buf);
+    sender.try_send((recv_buf.to_vec(), peer_addr)).unwrap();
+    Ok((buf.len() as u64, n as u64))
 }
 
 async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
