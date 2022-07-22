@@ -44,6 +44,7 @@ pub struct Redir {
     pub method: String,
     #[serde(default)]
     pub mode: Mode,
+    pub redir_addr: Option<SocketAddr>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
