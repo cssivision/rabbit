@@ -175,36 +175,33 @@ impl Future for UdpRelay {
 async fn proxy_packet(
     server_addr: SocketAddr,
     mut cipher: Cipher,
-    mut buf: Vec<u8>,
+    buf: Vec<u8>,
     peer_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
     sender: async_channel::Sender<(Vec<u8>, SocketAddr)>,
 ) -> io::Result<(u64, u64)> {
-    cipher.init_encrypt();
-    let mut data = cipher.iv().to_vec();
     let redir_addr = if let Some(redir_addr) = redir_addr {
         redir_addr
     } else {
         unimplemented!()
     };
+    cipher.init_encrypt();
+    let mut data = cipher.iv().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
-    cipher.encrypt(&mut buf);
     data.extend_from_slice(&buf);
+    cipher.encrypt(&mut data[cipher.iv_len()..]);
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
     let socket = UdpSocket::bind(&local)?;
     socket.connect(server_addr)?;
-    let _ = socket.send(&buf).await?;
+    let _ = socket.send(&data).await?;
     let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
     let n = socket.recv(&mut recv_buf).await?;
     recv_buf.truncate(n);
 
-    // encrypt return data.
-    if !cipher.is_decrypt_inited() {
-        cipher.init_decrypt();
-    }
+    cipher.init_decrypt();
     cipher.decrypt(&mut recv_buf);
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
