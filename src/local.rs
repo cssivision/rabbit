@@ -1,7 +1,6 @@
 use std::future::pending;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
-use std::str::FromStr;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,10 +12,8 @@ use crate::cipher::Cipher;
 use crate::config;
 use crate::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
-use crate::socks5::{
-    self,
-    v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6},
-};
+use crate::socks5;
+use crate::util::generate_raw_addr;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -97,28 +94,4 @@ where
     .await??;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
     Ok((n1, n2))
-}
-
-fn generate_raw_addr(host: &str, port: u16) -> Vec<u8> {
-    match IpAddr::from_str(host) {
-        Ok(IpAddr::V4(host)) => {
-            let mut rawaddr = vec![TYPE_IPV4];
-            rawaddr.extend_from_slice(&host.octets());
-            rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-            rawaddr
-        }
-        Ok(IpAddr::V6(host)) => {
-            let mut rawaddr = vec![TYPE_IPV6];
-            rawaddr.extend_from_slice(&host.octets());
-            rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-            rawaddr
-        }
-        _ => {
-            let dm_len = host.as_bytes().len();
-            let mut rawaddr = vec![TYPE_DOMAIN, dm_len as u8];
-            rawaddr.extend_from_slice(host.as_bytes());
-            rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
-            rawaddr
-        }
-    }
 }

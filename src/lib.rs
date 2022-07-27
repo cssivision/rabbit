@@ -15,6 +15,7 @@ pub mod io;
 pub mod listener;
 pub mod local;
 mod read_exact;
+pub mod redir;
 pub mod resolver;
 pub mod server;
 pub mod socks5;
