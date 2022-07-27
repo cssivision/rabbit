@@ -66,7 +66,7 @@ impl Service {
 
     pub async fn stream_relay(&self) -> io::Result<()> {
         let cipher = Cipher::new(&self.config.method, &self.config.password);
-        let local_addr = self.config.local_addr.clone();
+        let local_addr = self.config.local_addr;
         let listener = TcpListener::bind(local_addr).await?;
         log::info!("listening connections on {:?}", self.config.local_addr);
         loop {

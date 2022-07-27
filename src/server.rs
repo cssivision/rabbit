@@ -180,10 +180,12 @@ async fn proxy_packet(
     peer_addr: SocketAddr,
     sender: async_channel::Sender<(Vec<u8>, SocketAddr)>,
 ) -> io::Result<(u64, u64)> {
+    let iv_len = cipher.iv_len();
     let cipher = Arc::new(Mutex::new(cipher));
 
     // get host and port.
-    let (host, port) = get_addr_info(cipher.clone(), &mut buf.as_slice()).await?;
+    let (n, host, port) = get_addr_info(cipher.clone(), &mut buf.as_slice()).await?;
+    buf.drain(..n + iv_len);
     log::debug!("proxy to address: {}:{}", host, port);
 
     // resolver host if need.
@@ -222,7 +224,7 @@ where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     let cipher = Arc::new(Mutex::new(cipher));
-    let (host, port) = timeout(
+    let (_, host, port) = timeout(
         DEFAULT_GET_ADDR_INFO_TIMEOUT,
         get_addr_info(cipher.clone(), socket1),
     )
@@ -245,13 +247,15 @@ where
     Ok((n1, n2))
 }
 
-async fn get_addr_info<A>(cipher: Arc<Mutex<Cipher>>, conn: &mut A) -> io::Result<(String, u16)>
+async fn get_addr_info<A>(
+    cipher: Arc<Mutex<Cipher>>,
+    conn: &mut A,
+) -> io::Result<(usize, String, u16)>
 where
     A: AsyncRead + Unpin + ?Sized,
 {
     let address_type = &mut vec![0u8; 1];
     let _ = read_exact(cipher.clone(), conn, address_type).await?;
-
     match address_type.first() {
         // For IPv4 addresses, we read the 4 bytes for the address as
         // well as 2 bytes for the port.
@@ -260,15 +264,13 @@ where
             let _ = read_exact(cipher.clone(), conn, buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
-            Ok((format!("{}", addr), port))
+            Ok((7, format!("{}", addr), port))
         }
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
         Some(&TYPE_IPV6) => {
             let buf = &mut vec![0u8; 18];
-
             let _ = read_exact(cipher.clone(), conn, buf).await?;
-
             let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
             let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
             let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
@@ -277,10 +279,9 @@ where
             let f = ((buf[10] as u16) << 8) | (buf[11] as u16);
             let g = ((buf[12] as u16) << 8) | (buf[13] as u16);
             let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
-
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
-            Ok((format!("{}", addr), port))
+            Ok((19, format!("{}", addr), port))
         }
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
@@ -289,17 +290,15 @@ where
             let _ = read_exact(cipher.clone(), conn, buf1).await?;
             let buf2 = &mut vec![0u8; buf1[0] as usize + 2];
             let _ = read_exact(cipher.clone(), conn, buf2).await?;
-
             let hostname = &buf2[..buf2.len() - 2];
             let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                 hostname
             } else {
                 return Err(other("hostname include invalid utf8"));
             };
-
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
-            Ok((hostname.to_string(), port))
+            Ok((2 + buf2.len(), hostname.to_string(), port))
         }
         n => {
             log::error!("unknown address type, received: {:?}", n);
