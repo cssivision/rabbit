@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use awak::net::{TcpListener, TcpStream, UdpSocket};
 use awak::time::timeout;
+use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, Stream};
 
 use crate::cipher::Cipher;
@@ -92,7 +93,7 @@ impl Service {
         let cipher = Cipher::new(&self.config.method, &self.config.password);
         let socket = UdpSocket::bind(self.config.local_addr)?;
         log::info!("listening udp on {:?}", self.config.local_addr);
-        let (sender, receiver) = async_channel::unbounded::<(Vec<u8>, SocketAddr)>();
+        let (sender, receiver) = channel(1024);
         let udp_relay = UdpRelay {
             buf: [0u8; MAX_UDP_BUFFER_SIZE],
             sender,
@@ -109,8 +110,8 @@ impl Service {
 
 struct UdpRelay {
     buf: [u8; MAX_UDP_BUFFER_SIZE],
-    sender: async_channel::Sender<(Vec<u8>, SocketAddr)>,
-    receiver: async_channel::Receiver<(Vec<u8>, SocketAddr)>,
+    sender: Sender<(Vec<u8>, SocketAddr)>,
+    receiver: Receiver<(Vec<u8>, SocketAddr)>,
     socket: UdpSocket,
     recv: Option<(Vec<u8>, SocketAddr)>,
     cipher: Cipher,
@@ -178,7 +179,7 @@ async fn proxy_packet(
     buf: Vec<u8>,
     peer_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
-    sender: async_channel::Sender<(Vec<u8>, SocketAddr)>,
+    mut sender: Sender<(Vec<u8>, SocketAddr)>,
 ) -> io::Result<(u64, u64)> {
     let redir_addr = if let Some(redir_addr) = redir_addr {
         redir_addr
