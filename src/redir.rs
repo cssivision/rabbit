@@ -1,10 +1,9 @@
-use std::future::pending;
-use std::future::Future;
+use std::future::{pending, Future};
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use awak::net::{TcpListener, TcpStream, UdpSocket};

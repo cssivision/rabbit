@@ -2,7 +2,7 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 
 use crate::cipher::Cipher;
 use crate::util::eof;

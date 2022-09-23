@@ -1,12 +1,11 @@
 #![allow(clippy::many_single_char_names)]
-use std::future::pending;
-use std::future::Future;
+use std::future::{pending, Future};
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 use std::str;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use awak::net::{TcpStream, UdpSocket};
