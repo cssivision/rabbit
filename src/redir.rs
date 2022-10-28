@@ -1,6 +1,7 @@
 use std::future::{pending, Future};
 use std::io;
 use std::net::SocketAddr;
+use std::os::unix::io::AsRawFd;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
@@ -10,6 +11,7 @@ use awak::net::{TcpListener, TcpStream, UdpSocket};
 use awak::time::timeout;
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, Stream};
+use socket2::SockAddr;
 
 use crate::cipher::Cipher;
 use crate::config::{self, Mode};
@@ -77,7 +79,7 @@ impl Service {
             let original_dst_addr = if let Some(addr) = self.config.redir_addr {
                 addr
             } else {
-                unimplemented!()
+                get_original_destination_addr(&socket)?
             };
             let proxy = async move {
                 if let Err(e) = proxy(server_addr, cipher, &mut socket, original_dst_addr).await {
@@ -104,6 +106,46 @@ impl Service {
             redir_addr: self.config.redir_addr,
         };
         udp_relay.await
+    }
+}
+
+fn get_original_destination_addr(s: &TcpStream) -> io::Result<SocketAddr> {
+    let fd = s.as_raw_fd();
+
+    unsafe {
+        let (_, addr) = SockAddr::init(|addr, addr_len| {
+            match s.local_addr()? {
+                SocketAddr::V4(..) => {
+                    let ret = libc::getsockopt(
+                        fd,
+                        libc::SOL_IP,
+                        libc::SO_ORIGINAL_DST,
+                        addr as *mut _,
+                        addr_len, // libc::socklen_t
+                    );
+                    if ret != 0 {
+                        let err = io::Error::last_os_error();
+                        return Err(err);
+                    }
+                }
+                SocketAddr::V6(..) => {
+                    let ret = libc::getsockopt(
+                        fd,
+                        libc::SOL_IPV6,
+                        libc::IP6T_SO_ORIGINAL_DST,
+                        addr as *mut _,
+                        addr_len, // libc::socklen_t
+                    );
+
+                    if ret != 0 {
+                        let err = io::Error::last_os_error();
+                        return Err(err);
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        Ok(addr.as_socket().expect("SocketAddr"))
     }
 }
 

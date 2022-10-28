@@ -11,7 +11,7 @@ pub enum Listener {
     Unix(UnixListener),
 }
 
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl AsyncReadWrite for TcpStream {}
 
@@ -28,7 +28,7 @@ impl Listener {
         }
     }
 
-    pub async fn accept(&self) -> io::Result<Box<dyn AsyncReadWrite + Unpin + Send>> {
+    pub async fn accept(&self) -> io::Result<Box<dyn AsyncReadWrite>> {
         match self {
             Listener::Unix(lis) => {
                 let (stream, addr) = lis.accept().await?;

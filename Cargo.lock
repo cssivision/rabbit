@@ -453,6 +453,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "getopts",
+ "libc",
  "log",
  "md5",
  "once_cell",
@@ -460,6 +461,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_derive",
+ "socket2",
  "toml",
 ]
 
