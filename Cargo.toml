@@ -1,16 +1,13 @@
 [package]
-name = "shadowsocks-rs"
+name = "rabbit"
 version = "0.9.0"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/cssivision/shadowsocks-rs"
-homepage = "https://github.com/cssivision/shadowsocks-rs"
-description = "personal port of shadowsocks in rust."
+repository = "https://github.com/cssivision/rabbit"
+homepage = "https://github.com/cssivision/rabbit"
+description = "personal VPN in rust."
 readme = "README.md"
 edition = "2018"
-
-[lib]
-name = "shadowsocks"
 
 [dependencies]
 serde = "1.0"

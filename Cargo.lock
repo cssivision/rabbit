@@ -355,6 +355,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rabbit"
+version = "0.9.0"
+dependencies = [
+ "aes",
+ "awak",
+ "cfb-mode",
+ "chacha20",
+ "cipher",
+ "ctr",
+ "dns-resolver",
+ "env_logger",
+ "futures-channel",
+ "futures-util",
+ "getopts",
+ "libc",
+ "log",
+ "md5",
+ "once_cell",
+ "pin-project-lite",
+ "rand",
+ "serde",
+ "serde_derive",
+ "socket2",
+ "toml",
+]
+
+[[package]]
 name = "rand"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -436,33 +463,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "shadowsocks-rs"
-version = "0.9.0"
-dependencies = [
- "aes",
- "awak",
- "cfb-mode",
- "chacha20",
- "cipher",
- "ctr",
- "dns-resolver",
- "env_logger",
- "futures-channel",
- "futures-util",
- "getopts",
- "libc",
- "log",
- "md5",
- "once_cell",
- "pin-project-lite",
- "rand",
- "serde",
- "serde_derive",
- "socket2",
- "toml",
 ]
 
 [[package]]
