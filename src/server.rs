@@ -228,13 +228,21 @@ where
         DEFAULT_GET_ADDR_INFO_TIMEOUT,
         get_addr_info(cipher.clone(), socket1),
     )
-    .await??;
+    .await
+    .map_err(|e| other(&format!("get addr info timeout: {:?}", e)))?
+    .map_err(|e| other(&format!("get addr info fail: {:?}", e)))?;
     log::debug!("proxy to address: {}:{}", host, port);
 
-    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
+    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host))
+        .await
+        .map_err(|e| other(&format!("resolve timeout: {:?}", e)))?
+        .map_err(|e| other(&format!("resolve fail: {:?}", e)))?;
     log::debug!("resolver addr to ip: {}", addr);
 
-    let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect((addr, port))).await??;
+    let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect((addr, port)))
+        .await
+        .map_err(|e| other(&format!("connect timeout: {:?}", e)))?
+        .map_err(|e| other(&format!("connect fail: {:?}", e)))?;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
@@ -242,7 +250,9 @@ where
         copy_bidirectional(&mut socket2, socket1, cipher),
         DEFAULT_IDLE_TIMEOUT,
     )
-    .await??;
+    .await
+    .map_err(|e| other(&format!("idle timeout: {:?}", e)))?
+    .map_err(|e| other(&format!("copy bidirectional fail: {:?}", e)))?;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
