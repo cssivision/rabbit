@@ -236,7 +236,7 @@ async fn proxy_packet(
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
-    let socket = UdpSocket::bind(&local)?;
+    let socket = UdpSocket::bind(local)?;
     socket.connect(server_addr)?;
     let _ = socket.send(&data).await?;
     let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];

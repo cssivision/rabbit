@@ -201,7 +201,7 @@ async fn proxy_packet(
     cipher.lock().unwrap().decrypt(&mut buf);
 
     // send to and recv from target.
-    let socket = UdpSocket::bind(&local)?;
+    let socket = UdpSocket::bind(local)?;
     socket.connect((addr, port))?;
     let _ = socket.send(&buf).await?;
     let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
