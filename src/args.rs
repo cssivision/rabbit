@@ -15,13 +15,13 @@ pub fn parse_args(name: &str) -> Option<Config> {
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(_) => {
-            print!("{}", opts.usage(&format!("Usage: {} -c PATH", name)));
+            print!("{}", opts.usage(&format!("Usage: {name} -c PATH")));
             return None;
         }
     };
 
     if matches.opt_present("h") {
-        print!("{}", opts.usage(&format!("Usage: {} -c PATH", name)));
+        print!("{}", opts.usage(&format!("Usage: {name} -c PATH")));
         process::exit(0);
     }
 

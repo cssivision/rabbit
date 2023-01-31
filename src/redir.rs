@@ -247,7 +247,7 @@ async fn proxy_packet(
     cipher.decrypt(&mut recv_buf);
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
-        .map_err(|e| other(&format!("send fail: {}", e)))?;
+        .map_err(|e| other(&format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
 
