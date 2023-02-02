@@ -21,7 +21,7 @@ rand = "0.8"
 md5 = "0.7"
 awak = "0.2"
 dns-resolver = { version = "0.2", default-features = false, features = ["awak-runtime"] }
-once_cell = "1.13"
+once_cell = "1.17"
 aes = "0.7"
 socket2 = { version = "0.4", features = ["all"] }
 cfb-mode = "0.7"
