@@ -74,7 +74,7 @@ where
                 resp.extend_from_slice(buf);
                 conn.write_all(&resp).await?;
 
-                Ok((format!("{}", addr), port))
+                Ok((format!("{addr}"), port))
             }
 
             // For IPv6 addresses there's 16 bytes of an address plus two
@@ -97,7 +97,7 @@ where
                 resp.extend_from_slice(buf);
                 conn.write_all(&resp).await?;
 
-                Ok((format!("{}", addr), port))
+                Ok((format!("{addr}"), port))
             }
 
             // The SOCKSv5 protocol not only supports proxying to specific
@@ -126,7 +126,7 @@ where
                 Ok((hostname.to_string(), port))
             }
             n => {
-                let msg = format!("unknown address type, received: {:?}", n);
+                let msg = format!("unknown address type, received: {n:?}");
                 Err(other(&msg))
             }
         };

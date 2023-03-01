@@ -93,7 +93,7 @@ impl Service {
             Addr::Path(addr) => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("invalid local_addr {:?}", addr),
+                    format!("invalid local_addr {addr:?}"),
                 ));
             }
             Addr::Socket(addr) => addr,
@@ -215,7 +215,7 @@ async fn proxy_packet(
     cipher.lock().unwrap().encrypt(&mut recv_buf);
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
-        .map_err(|e| other(&format!("send fail: {}", e)))?;
+        .map_err(|e| other(&format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
 
@@ -229,20 +229,20 @@ where
         get_addr_info(cipher.clone(), socket1),
     )
     .await
-    .map_err(|e| other(&format!("get addr info timeout: {:?}", e)))?
-    .map_err(|e| other(&format!("get addr info fail: {:?}", e)))?;
+    .map_err(|e| other(&format!("get addr info timeout: {e:?}")))?
+    .map_err(|e| other(&format!("get addr info fail: {e:?}")))?;
     log::debug!("proxy to address: {}:{}", host, port);
 
     let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host))
         .await
-        .map_err(|e| other(&format!("resolve timeout: {:?}", e)))?
-        .map_err(|e| other(&format!("resolve fail: {:?}", e)))?;
+        .map_err(|e| other(&format!("resolve timeout: {e:?}")))?
+        .map_err(|e| other(&format!("resolve fail: {e:?}")))?;
     log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect((addr, port)))
         .await
-        .map_err(|e| other(&format!("connect timeout: {:?}", e)))?
-        .map_err(|e| other(&format!("connect fail: {:?}", e)))?;
+        .map_err(|e| other(&format!("connect timeout: {e:?}")))?
+        .map_err(|e| other(&format!("connect fail: {e:?}")))?;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
@@ -251,8 +251,8 @@ where
         DEFAULT_IDLE_TIMEOUT,
     )
     .await
-    .map_err(|e| other(&format!("idle timeout: {:?}", e)))?
-    .map_err(|e| other(&format!("copy bidirectional fail: {:?}", e)))?;
+    .map_err(|e| other(&format!("idle timeout: {e:?}")))?
+    .map_err(|e| other(&format!("copy bidirectional fail: {e:?}")))?;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
@@ -274,7 +274,7 @@ where
             let _ = read_exact(cipher.clone(), conn, buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
-            Ok((7, format!("{}", addr), port))
+            Ok((7, format!("{addr}"), port))
         }
         // For IPv6 addresses there's 16 bytes of an address plus two
         // bytes for a port, so we read that off and then keep going.
@@ -291,7 +291,7 @@ where
             let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
-            Ok((19, format!("{}", addr), port))
+            Ok((19, format!("{addr}"), port))
         }
         // The SOCKSv5 protocol not only supports proxying to specific
         // IP addresses, but also arbitrary hostnames.
