@@ -4,7 +4,7 @@
 https://github.com/cssivision/rabbit/actions)
 [![License](http://img.shields.io/badge/license-mit-blue.svg)](https://github.com/cssivision/rabbit/blob/master/LICENSE)
 
-personal VPN in rust.
+personal tunnel in rust.
 
 # Configuration
 config.toml
