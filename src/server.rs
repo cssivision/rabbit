@@ -1,5 +1,5 @@
 #![allow(clippy::many_single_char_names)]
-use std::future::{pending, Future};
+use std::future::Future;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
@@ -36,7 +36,7 @@ impl Server {
         Server { services }
     }
 
-    pub async fn serve(self) {
+    pub fn serve(self) {
         for s in self.services {
             awak::spawn(async move {
                 if let Err(e) = s.serve().await {
@@ -45,7 +45,6 @@ impl Server {
             })
             .detach();
         }
-        pending().await
     }
 }
 

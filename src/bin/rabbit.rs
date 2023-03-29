@@ -14,13 +14,13 @@ fn main() {
 
     awak::block_on(async {
         if let Some(c) = config.client {
-            awak::spawn(local::Server::new(c).serve()).detach();
+            local::Server::new(c).serve()
         }
         if let Some(c) = config.server {
-            awak::spawn(server::Server::new(c).serve()).detach();
+            server::Server::new(c).serve();
         }
         if let Some(c) = config.redir {
-            awak::spawn(redir::Server::new(c).serve()).detach();
+            redir::Server::new(c).serve();
         }
         pending().await
     })

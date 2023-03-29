@@ -63,6 +63,7 @@ enum TransferState {
     ShuttingDown(u64),
     Done(u64),
 }
+
 #[derive(Debug)]
 enum Direction {
     Encrypt,

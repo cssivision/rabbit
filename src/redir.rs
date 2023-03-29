@@ -1,4 +1,4 @@
-use std::future::{pending, Future};
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
@@ -31,7 +31,7 @@ impl Server {
         Server { services }
     }
 
-    pub async fn serve(self) {
+    pub fn serve(self) {
         for s in self.services {
             awak::spawn(async move {
                 if let Err(e) = s.serve().await {
@@ -40,7 +40,6 @@ impl Server {
             })
             .detach();
         }
-        pending().await
     }
 }
 
