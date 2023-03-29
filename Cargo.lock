@@ -121,9 +121,9 @@ dependencies = [
 
 [[package]]
 name = "dns-resolver"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f771e5fb8ed52e2bffcb2e2bd0ca862494dbb8eaec5a73284a9a2f1a213b17a"
+checksum = "48d8def8b16e4cc0c22f5e852df9290bcab619430de4826a220bde422d9d9b59"
 dependencies = [
  "awak",
  "domain",
@@ -134,9 +134,9 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.6.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eb073186f6285f852b9e71b544111306ab08da4a6b40c25a73f4c9ee3e3df29"
+checksum = "415f70b855528e589c4d787338d22ad4e9e6d012167ba3c5279f4e9805e50ceb"
 dependencies = [
  "rand",
 ]
