@@ -14,7 +14,7 @@ fn main() {
 
     awak::block_on(async {
         if let Some(c) = config.client {
-            local::Server::new(c).serve()
+            local::Server::new(c).serve();
         }
         if let Some(c) = config.server {
             server::Server::new(c).serve();
