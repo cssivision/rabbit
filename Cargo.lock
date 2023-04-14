@@ -271,9 +271,9 @@ dependencies = [
 
 [[package]]
 name = "io-uring"
-version = "0.5.13"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd1e1a01cfb924fd8c5c43b6827965db394f5a3a16c599ce03452266e1cf984c"
+checksum = "8b7b36074613a723279637061b40db993208908a94f10ccb14436ce735bc0f57"
 dependencies = [
  "bitflags",
  "libc",
@@ -537,9 +537,9 @@ dependencies = [
 
 [[package]]
 name = "slings"
-version = "0.3.18"
+version = "0.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "453fb5e942f53a6fff47611648a83712d79318e7d3e3b2fa00067bf8725e9f30"
+checksum = "4c94a4ed39908dae0526d7771e05852ac9c85627605dfe95e4fe7a6e5bb8ab4d"
 dependencies = [
  "async-task",
  "futures-core",
