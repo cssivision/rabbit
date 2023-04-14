@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 
 use futures_util::AsyncWrite;
 

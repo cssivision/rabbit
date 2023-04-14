@@ -6,11 +6,11 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures_util::{AsyncRead, AsyncWrite};
-use shadowsocks::args::parse_args;
-use shadowsocks::cipher::Cipher;
-use shadowsocks::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
-use shadowsocks::socks5;
-use shadowsocks::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
+use rabbit::args::parse_args;
+use rabbit::cipher::Cipher;
+use rabbit::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
+use rabbit::socks5;
+use rabbit::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use slings::net::{TcpListener, TcpStream};
 use slings::time::timeout;
 

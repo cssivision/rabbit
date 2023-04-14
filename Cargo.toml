@@ -1,23 +1,20 @@
 [package]
-name = "shadowsocks-rs"
+name = "rabbit"
 version = "0.8.3"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/cssivision/shadowsocks-rs"
-homepage = "https://github.com/cssivision/shadowsocks-rs"
-description = "personal port of shadowsocks in rust."
+repository = "https://github.com/cssivision/rabbit"
+homepage = "https://github.com/cssivision/rabbit"
+description = "personal vpn in rust."
 readme = "README.md"
-edition = "2018"
-
-[lib]
-name = "shadowsocks"
+edition = "2021"
 
 [dependencies]
 serde = "1.0"
 serde_derive = "1.0"
-toml = "0.5"
+toml = "0.6"
 log = "0.4"
-env_logger = "0.8"
+env_logger = "0.10"
 getopts = "0.2"
 rand = "0.8"
 md5 = "0.3"
@@ -28,6 +25,6 @@ cfb-mode = "0.7"
 chacha20 = "0.7"
 ctr = "0.7"
 cipher = "0.3"
-once_cell = "1.8"
+once_cell = "1.17"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 pin-project-lite = "0.2"
