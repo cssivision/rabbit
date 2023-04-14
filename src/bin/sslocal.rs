@@ -24,7 +24,7 @@ fn main() -> io::Result<()> {
         toml::ser::to_string_pretty(&config).unwrap()
     );
     slings::block_on(async {
-        let listener = TcpListener::bind(&config.local_addr)?;
+        let listener = TcpListener::bind(config.local_addr)?;
         log::info!("listening connections on {}", config.local_addr);
         let cipher = Cipher::new(&config.method, &config.password);
         loop {

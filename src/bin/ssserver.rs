@@ -29,7 +29,7 @@ fn main() -> io::Result<()> {
     );
     let cipher = Cipher::new(&config.method, &config.password);
     slings::block_on(async {
-        let listener = TcpListener::bind(&config.server_addr)?;
+        let listener = TcpListener::bind(config.server_addr)?;
         loop {
             let (mut socket, addr) = listener.accept().await?;
             log::debug!("accept stream from addr {:?}", addr);
@@ -83,7 +83,7 @@ where
     let address_type = &mut vec![0u8; 1];
     let _ = read_exact(cipher.clone(), conn, address_type).await?;
 
-    match address_type.get(0) {
+    match address_type.first() {
         // For IPv4 addresses, we read the 4 bytes for the address as
         // well as 2 bytes for the port.
         Some(&TYPE_IPV4) => {
