@@ -64,8 +64,8 @@ pub struct Cipher {
     key_len: usize,
     iv: Vec<u8>,
     iv_len: usize,
-    enc: Option<Box<dyn SymmetricCipher + Send + Sync + 'static>>,
-    dec: Option<Box<dyn SymmetricCipher + Send + Sync + 'static>>,
+    enc: Option<Box<dyn SymmetricCipher>>,
+    dec: Option<Box<dyn SymmetricCipher>>,
     cipher_method: CipherMethod,
 }
 
@@ -133,7 +133,7 @@ impl Cipher {
         self.dec.is_some()
     }
 
-    fn new_cipher(&self, iv: &[u8]) -> Box<dyn SymmetricCipher + Send + Sync + 'static> {
+    fn new_cipher(&self, iv: &[u8]) -> Box<dyn SymmetricCipher> {
         let key: &[u8] = &self.key;
         match self.cipher_method {
             CipherMethod::Aes128Cfb => {
