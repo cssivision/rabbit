@@ -547,9 +547,9 @@ dependencies = [
 
 [[package]]
 name = "slings"
-version = "0.3.22"
+version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40defa31f7864ca3b2d38bbe8685e347b33e680b1a2026347690f339fa231cad"
+checksum = "07676f8f1077c972d9193f041accecdd536bb37b7bd7db7a831cc6b938d807e2"
 dependencies = [
  "async-task",
  "futures-core",
