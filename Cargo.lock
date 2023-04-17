@@ -157,6 +157,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures-channel"
+version = "0.3.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "955518d47e09b25bbebc7a18df10b81f0c766eaf4c4f1cccef2fca5f2a4fb5f2"
+dependencies = [
+ "futures-core",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -401,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "rabbit"
-version = "0.8.3"
+version = "0.9.0"
 dependencies = [
  "aes",
  "cfb-mode",
@@ -410,6 +419,7 @@ dependencies = [
  "ctr",
  "dns-resolver",
  "env_logger",
+ "futures-channel",
  "futures-util",
  "getopts",
  "log",
@@ -537,9 +547,9 @@ dependencies = [
 
 [[package]]
 name = "slings"
-version = "0.3.20"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07c04ff7ebd73460cffa258c09eab117995f26a9bb0846733f0ae153de31cbdb"
+checksum = "1959b47d544a74e1bfda0bdfdcd8c38ab9a72b0adf0bc3dcc1ed847a3dbb751b"
 dependencies = [
  "async-task",
  "futures-core",

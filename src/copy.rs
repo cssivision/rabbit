@@ -146,10 +146,11 @@ impl CopyBuffer {
     {
         {
             let mut cipher = self.cipher.borrow_mut();
-            if cipher.dec.is_none() {
-                while self.pos < cipher.iv.len() {
-                    let n =
-                        ready!(Pin::new(&mut reader).poll_read(cx, &mut cipher.iv[self.pos..]))?;
+            if cipher.is_decrypt_inited() {
+                while self.pos < cipher.iv_len() {
+                    let n = ready!(
+                        Pin::new(&mut reader).poll_read(cx, &mut cipher.iv_mut()[self.pos..])
+                    )?;
                     self.pos += n;
                     if n == 0 {
                         return Err(eof()).into();
@@ -174,12 +175,12 @@ impl CopyBuffer {
     {
         {
             let mut cipher = self.cipher.borrow_mut();
-            if cipher.enc.is_none() {
+            if cipher.is_encrypt_inited() {
                 cipher.init_encrypt();
                 self.pos = 0;
-                let n = cipher.iv.len();
+                let n = cipher.iv_len();
                 self.cap = n;
-                self.buf[..n].copy_from_slice(&cipher.iv);
+                self.buf[..n].copy_from_slice(cipher.iv());
             }
         }
         self.poll_copy(cx, reader, writer, Direction::Encrypt)

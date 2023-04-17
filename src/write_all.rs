@@ -50,12 +50,12 @@ where
             match &mut me.state {
                 State::Iv => {
                     let mut cipher = me.cipher.borrow_mut();
-                    if cipher.enc.is_some() {
+                    if cipher.is_encrypt_inited() {
                         me.state = State::Write(vec![]);
                         continue;
                     }
                     cipher.init_encrypt();
-                    let iv = cipher.iv.clone();
+                    let iv = cipher.iv().to_vec();
                     let iv_len = iv.len();
                     let mut data = iv;
                     data.extend_from_slice(me.buf);

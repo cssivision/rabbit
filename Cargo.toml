@@ -1,6 +1,6 @@
 [package]
 name = "rabbit"
-version = "0.8.3"
+version = "0.9.0"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/cssivision/rabbit"
@@ -28,3 +28,4 @@ cipher = "0.3"
 once_cell = "1.17"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 pin-project-lite = "0.2"
+futures-channel = "0.3"

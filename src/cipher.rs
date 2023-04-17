@@ -60,12 +60,12 @@ type Aes192Ctr = Ctr128BE<Aes192>;
 type Aes256Ctr = Ctr128BE<Aes256>;
 
 pub struct Cipher {
-    pub key: Vec<u8>,
-    pub key_len: usize,
-    pub iv: Vec<u8>,
-    pub iv_len: usize,
-    pub enc: Option<Box<dyn SymmetricCipher + Send + 'static>>,
-    pub dec: Option<Box<dyn SymmetricCipher + Send + 'static>>,
+    key: Vec<u8>,
+    key_len: usize,
+    iv: Vec<u8>,
+    iv_len: usize,
+    enc: Option<Box<dyn SymmetricCipher + Send + Sync + 'static>>,
+    dec: Option<Box<dyn SymmetricCipher + Send + Sync + 'static>>,
     cipher_method: CipherMethod,
 }
 
@@ -113,7 +113,27 @@ impl Cipher {
         self.enc = Some(self.new_cipher(&self.iv));
     }
 
-    fn new_cipher(&self, iv: &[u8]) -> Box<dyn SymmetricCipher + Send + 'static> {
+    pub fn iv(&self) -> &[u8] {
+        &self.iv
+    }
+
+    pub fn iv_len(&self) -> usize {
+        self.iv_len
+    }
+
+    pub fn iv_mut(&mut self) -> &mut [u8] {
+        &mut self.iv[..]
+    }
+
+    pub fn is_encrypt_inited(&self) -> bool {
+        self.enc.is_some()
+    }
+
+    pub fn is_decrypt_inited(&self) -> bool {
+        self.dec.is_some()
+    }
+
+    fn new_cipher(&self, iv: &[u8]) -> Box<dyn SymmetricCipher + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
         match self.cipher_method {
             CipherMethod::Aes128Cfb => {
@@ -148,12 +168,13 @@ impl Cipher {
         }
     }
 
+    #[must_use]
     pub fn reset(&self) -> Cipher {
         Cipher {
             key: self.key.clone(),
             iv: vec![0u8; self.iv_len],
-            key_len: self.key_len,
             iv_len: self.iv_len,
+            key_len: self.key_len,
             enc: None,
             dec: None,
             cipher_method: self.cipher_method,
