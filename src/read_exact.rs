@@ -8,7 +8,6 @@ use std::task::{ready, Context, Poll};
 use futures_util::AsyncRead;
 
 use crate::cipher::Cipher;
-use crate::util::eof;
 
 enum State {
     Iv,
@@ -64,7 +63,7 @@ where
                                 .poll_read(cx, &mut cipher.iv_mut()[me.pos..]))?;
                         me.pos += n;
                         if n == 0 {
-                            return Err(eof()).into();
+                            return Err(io::ErrorKind::UnexpectedEof.into()).into();
                         }
                     }
                     me.pos = 0;
@@ -78,7 +77,7 @@ where
                             ready!(Pin::new(&mut *me.reader).poll_read(cx, &mut me.buf[me.pos..]))?;
                         me.pos += n;
                         if n == 0 {
-                            return Err(eof()).into();
+                            return Err(io::ErrorKind::UnexpectedEof.into()).into();
                         }
                     }
 

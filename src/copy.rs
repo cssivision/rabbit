@@ -8,7 +8,6 @@ use std::task::{ready, Context, Poll};
 use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
-use crate::util::eof;
 
 pub async fn copy_bidirectional<A, B>(
     a: &mut A,
@@ -146,14 +145,14 @@ impl CopyBuffer {
     {
         {
             let mut cipher = self.cipher.borrow_mut();
-            if cipher.is_decrypt_inited() {
+            if !cipher.is_decrypt_inited() {
                 while self.pos < cipher.iv_len() {
                     let n = ready!(
                         Pin::new(&mut reader).poll_read(cx, &mut cipher.iv_mut()[self.pos..])
                     )?;
                     self.pos += n;
                     if n == 0 {
-                        return Err(eof()).into();
+                        return Err(io::ErrorKind::UnexpectedEof.into()).into();
                     }
                 }
                 self.pos = 0;
@@ -175,7 +174,7 @@ impl CopyBuffer {
     {
         {
             let mut cipher = self.cipher.borrow_mut();
-            if cipher.is_encrypt_inited() {
+            if !cipher.is_encrypt_inited() {
                 cipher.init_encrypt();
                 self.pos = 0;
                 let n = cipher.iv_len();

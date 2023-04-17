@@ -11,10 +11,6 @@ pub fn other(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
-pub fn eof() -> io::Error {
-    io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
-}
-
 pub fn generate_key(data: &[u8], key_len: usize) -> Vec<u8> {
     let count = (key_len as f32 / MD5_LENGTH as f32).ceil() as u32;
     let mut key = Vec::from(&compute(data)[..]);
