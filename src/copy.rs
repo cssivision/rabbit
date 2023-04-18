@@ -235,10 +235,7 @@ impl CopyBuffer {
                 let i =
                     ready!(Pin::new(&mut writer).poll_write(cx, &self.buf[self.pos..self.cap]))?;
                 if i == 0 {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "write zero byte into writer",
-                    )));
+                    return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
                 } else {
                     self.pos += i;
                     self.amt += i as u64;
