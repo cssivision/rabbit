@@ -19,7 +19,7 @@ impl AsyncReadWrite for TcpStream {}
 impl AsyncReadWrite for UnixStream {}
 
 impl Listener {
-    pub async fn bind(addr: Addr) -> io::Result<Listener> {
+    pub fn bind(addr: Addr) -> io::Result<Listener> {
         match addr {
             Addr::Path(addr) => {
                 let _ = fs::remove_file(&addr);

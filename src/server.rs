@@ -60,7 +60,7 @@ impl Service {
 
     pub async fn stream_relay(&self) -> io::Result<()> {
         let cipher = Cipher::new(&self.config.method, &self.config.password);
-        let mut listener = Listener::bind(self.config.local_addr.clone()).await?;
+        let mut listener = Listener::bind(self.config.local_addr.clone())?;
         log::info!("listening on {:?}", self.config.local_addr);
         loop {
             let mut socket = listener.accept().await?;
