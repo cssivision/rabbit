@@ -1,14 +1,13 @@
 use std::fs;
 use std::io;
-use std::net::SocketAddr;
 
-use futures_util::{AsyncRead, AsyncWrite, Stream, StreamExt};
+use futures_util::{AsyncRead, AsyncWrite};
 use slings::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
 use crate::config::Addr;
 
 pub enum Listener {
-    Tcp(Box<dyn Stream<Item = io::Result<(TcpStream, SocketAddr)>> + Unpin>),
+    Tcp(TcpListener),
     Unix(UnixListener),
 }
 
@@ -25,9 +24,7 @@ impl Listener {
                 let _ = fs::remove_file(&addr);
                 Ok(Listener::Unix(UnixListener::bind(addr)?))
             }
-            Addr::Socket(addr) => Ok(Listener::Tcp(Box::new(
-                TcpListener::bind(addr)?.accept_multi(),
-            ))),
+            Addr::Socket(addr) => Ok(Listener::Tcp(TcpListener::bind(addr)?)),
         }
     }
 
@@ -39,13 +36,9 @@ impl Listener {
                 Ok(Box::new(stream))
             }
             Listener::Tcp(lis) => {
-                if let Some(v) = lis.next().await {
-                    let (stream, addr) = v?;
-                    log::debug!("accept stream from addr {:?}", addr);
-                    Ok(Box::new(stream))
-                } else {
-                    Err(io::ErrorKind::UnexpectedEof.into())
-                }
+                let (stream, addr) = lis.accept2().await?;
+                log::debug!("accept stream from addr {:?}", addr);
+                Ok(Box::new(stream))
             }
         }
     }
