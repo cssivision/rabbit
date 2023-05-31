@@ -112,7 +112,7 @@ fn get_original_destination_addr(s: &TcpStream) -> io::Result<SocketAddr> {
     let fd = s.as_raw_fd();
 
     unsafe {
-        let (_, addr) = SockAddr::init(|addr, addr_len| {
+        let (_, addr) = SockAddr::try_init(|addr, addr_len| {
             match s.local_addr()? {
                 SocketAddr::V4(..) => {
                     let ret = libc::getsockopt(
