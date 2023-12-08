@@ -113,25 +113,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "dns-resolver"
-version = "0.2.12"
+name = "deranged"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48d8def8b16e4cc0c22f5e852df9290bcab619430de4826a220bde422d9d9b59"
+checksum = "8eb30d70a07a3b04884d2677f06bec33509dc67ca60d92949e5535352d3191dc"
+
+[[package]]
+name = "dns-resolver"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37c6c9fb03503f56d0dc080eb1a4a1c4e2c4b0de6f41d9f8379d7fec31566032"
 dependencies = [
  "awak",
  "domain",
  "futures-util",
  "lru_time_cache",
+ "octseq",
  "resolv-conf",
 ]
 
 [[package]]
 name = "domain"
-version = "0.7.2"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "415f70b855528e589c4d787338d22ad4e9e6d012167ba3c5279f4e9805e50ceb"
+checksum = "7af83e443e4bfe8602af356e5ca10b9676634e53d178875017f2ff729898a388"
 dependencies = [
+ "octseq",
  "rand",
+ "time",
 ]
 
 [[package]]
@@ -343,6 +352,12 @@ name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
+
+[[package]]
+name = "octseq"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd09a3d18c298e5d9b66cf65db82e2e1694b94fbc032f83e304a5cbc87bcc3bb"
 
 [[package]]
 name = "once_cell"
@@ -560,6 +575,23 @@ checksum = "be55cf8942feac5c765c2c993422806843c9a9a45d4d5c407ad6dd2ea95eb9b6"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "time"
+version = "0.3.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a79d09ac6b08c1ab3906a2f7cc2e81a0e27c7ae89c63812df75e52bef0751e07"
+dependencies = [
+ "deranged",
+ "serde",
+ "time-core",
+]
+
+[[package]]
+name = "time-core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7300fbefb4dadc1af235a9cef3737cea692a9d97e1b9cbcd4ebdae6f8868e6fb"
 
 [[package]]
 name = "toml"
