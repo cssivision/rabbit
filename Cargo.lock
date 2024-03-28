@@ -85,9 +85,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "awak"
-version = "0.2.29"
+version = "0.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e234e81e3d2c1907383cfacb4bb0c4024067a6f916aea2cf28f5dfbbc74c7b75"
+checksum = "818904f0381e4f666128103aa90d4117d66bdf625ee4991d7376149e441107ea"
 dependencies = [
  "async-task",
  "cfg-if",
@@ -99,6 +99,7 @@ dependencies = [
  "rand",
  "slab",
  "socket2",
+ "thread_local",
 ]
 
 [[package]]
@@ -539,6 +540,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "thread_local"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
+dependencies = [
+ "cfg-if",
+ "once_cell",
 ]
 
 [[package]]
