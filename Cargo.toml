@@ -25,7 +25,6 @@ cfb-mode = "0.7"
 chacha20 = "0.7"
 ctr = "0.7"
 cipher = "0.3"
-once_cell = "1.19"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 pin-project-lite = "0.2"
 futures-channel = "0.3"
