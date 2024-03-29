@@ -1,13 +1,14 @@
 use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use dns_resolver::Resolver;
 use rand::{thread_rng, Rng};
 
 use crate::util::other;
 
-static GLOBAL_RESOLVER: std::sync::OnceLock<Resolver> = std::sync::OnceLock::new();
+static GLOBAL_RESOLVER: OnceLock<Resolver> = OnceLock::new();
 
 pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     if let Ok(addr) = IpAddr::from_str(host) {
