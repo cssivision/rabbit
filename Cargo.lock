@@ -424,7 +424,6 @@ dependencies = [
  "libc",
  "log",
  "md5",
- "once_cell",
  "pin-project-lite",
  "rand",
  "serde",
