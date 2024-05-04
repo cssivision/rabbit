@@ -10,12 +10,13 @@ use std::time::Duration;
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
+use awak::util::IdleTimeout;
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, Stream};
 
 use crate::cipher::Cipher;
 use crate::config::{self, Addr, Mode};
-use crate::io::{copy_bidirectional, read_exact, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
+use crate::io::{copy_bidirectional, read_exact, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
@@ -248,6 +249,7 @@ where
     let (n1, n2) = IdleTimeout::new(
         copy_bidirectional(&mut socket2, socket1, cipher),
         DEFAULT_IDLE_TIMEOUT,
+        DEFAULT_CHECK_INTERVAL,
     )
     .await
     .map_err(|e| other(&format!("idle timeout: {e:?}")))?

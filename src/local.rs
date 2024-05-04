@@ -5,11 +5,12 @@ use std::time::Duration;
 
 use awak::net::TcpStream;
 use awak::time::timeout;
+use awak::util::IdleTimeout;
 use futures_util::{AsyncRead, AsyncWrite};
 
 use crate::cipher::Cipher;
 use crate::config;
-use crate::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
+use crate::io::{copy_bidirectional, write_all, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
 use crate::socks5;
 use crate::util::generate_raw_addr;
@@ -88,6 +89,7 @@ where
     let (n1, n2) = IdleTimeout::new(
         copy_bidirectional(socket1, &mut socket2, cipher),
         DEFAULT_IDLE_TIMEOUT,
+        DEFAULT_CHECK_INTERVAL,
     )
     .await??;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);

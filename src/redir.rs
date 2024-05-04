@@ -9,13 +9,14 @@ use std::time::Duration;
 
 use awak::net::{TcpListener, TcpStream, UdpSocket};
 use awak::time::timeout;
+use awak::util::IdleTimeout;
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, Stream};
 use socket2::SockAddr;
 
 use crate::cipher::Cipher;
 use crate::config::{self, Mode};
-use crate::io::{copy_bidirectional, write_all, IdleTimeout, DEFAULT_IDLE_TIMEOUT};
+use crate::io::{copy_bidirectional, write_all, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 use crate::util::{generate_raw_addr, other};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -273,6 +274,7 @@ where
     let (n1, n2) = IdleTimeout::new(
         copy_bidirectional(socket1, &mut socket2, cipher),
         DEFAULT_IDLE_TIMEOUT,
+        DEFAULT_CHECK_INTERVAL,
     )
     .await??;
     log::debug!("proxy local => remote: {}, remote => local: {:?}", n1, n2);
