@@ -145,7 +145,7 @@ fn get_original_destination_addr(s: &TcpStream) -> io::Result<SocketAddr> {
             }
             Ok(())
         })?;
-        Ok(addr.as_socket().expect("SocketAddr"))
+        addr.as_socket().ok_or_else(|| other("invalid SocketAddr"))
     }
 }
 
