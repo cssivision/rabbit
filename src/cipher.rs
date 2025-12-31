@@ -22,8 +22,8 @@ struct Cfb<C: BlockCipher + BlockEncryptMut + Clone + KeyInit> {
 
 impl<C: BlockCipher + BlockEncryptMut + Clone + KeyInit> Cfb<C> {
     fn new(key: &[u8], iv: &[u8]) -> Result<Cfb<C>, cipher::InvalidLength> {
-        let enc = cfb_mode::Encryptor::<C>::new_from_slices(&key, &iv)?;
-        let dec = cfb_mode::Decryptor::<C>::new_from_slices(&key, &iv)?;
+        let enc = cfb_mode::Encryptor::<C>::new_from_slices(key, iv)?;
+        let dec = cfb_mode::Decryptor::<C>::new_from_slices(key, iv)?;
         Ok(Cfb { enc, dec })
     }
 }
