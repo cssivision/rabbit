@@ -20,12 +20,12 @@ rand = "0.9"
 md5 = "0.8"
 awak = "0.2"
 dns-resolver = { version = "0.2", default-features = false, features = ["awak-runtime"] }
-aes = "0.7"
+aes = "0.8"
 socket2 = { version = "0.6", features = ["all"] }
-cfb-mode = "0.7"
-chacha20 = "0.7"
-ctr = "0.7"
-cipher = "0.3"
+cfb-mode = "0.8"
+chacha20 = "0.9"
+ctr = "0.9"
+cipher = "0.4"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 pin-project-lite = "0.2"
 futures-channel = "0.3"

@@ -1,7 +1,6 @@
 use aes::{Aes128, Aes192, Aes256};
-use cfb_mode::Cfb;
 use chacha20::ChaCha20;
-use cipher::{consts::U16, AsyncStreamCipher, BlockCipher, BlockEncrypt, NewCipher, StreamCipher};
+use cipher::{AsyncStreamCipher, BlockCipher, BlockEncryptMut, KeyInit, KeyIvInit, StreamCipher};
 use ctr::Ctr128BE;
 use rand::rng;
 use rand::Rng;
@@ -16,19 +15,80 @@ pub trait SymmetricCipher {
     fn decrypt(&mut self, data: &mut [u8]);
 }
 
-impl<C: BlockCipher + BlockEncrypt> SymmetricCipher for Cfb<C> {
+struct Cfb<C: BlockCipher + BlockEncryptMut + Clone + KeyInit> {
+    enc: cfb_mode::Encryptor<C>,
+    dec: cfb_mode::Decryptor<C>,
+}
+
+impl<C: BlockCipher + BlockEncryptMut + Clone + KeyInit> Cfb<C> {
+    fn new(key: &[u8], iv: &[u8]) -> Result<Cfb<C>, cipher::InvalidLength> {
+        let enc = cfb_mode::Encryptor::<C>::new_from_slices(&key, &iv)?;
+        let dec = cfb_mode::Decryptor::<C>::new_from_slices(&key, &iv)?;
+        Ok(Cfb { enc, dec })
+    }
+}
+
+impl SymmetricCipher for Aes128Cfb {
     /// Encrypt data in place.
     fn encrypt(&mut self, data: &mut [u8]) {
-        AsyncStreamCipher::encrypt(self, data)
+        self.enc.clone().encrypt(data);
     }
 
     /// Decrypt data in place.
     fn decrypt(&mut self, data: &mut [u8]) {
-        AsyncStreamCipher::decrypt(self, data)
+        self.dec.clone().decrypt(data);
     }
 }
 
-impl<B: BlockEncrypt + BlockCipher<BlockSize = U16>> SymmetricCipher for Ctr128BE<B> {
+impl SymmetricCipher for Aes192Cfb {
+    /// Encrypt data in place.
+    fn encrypt(&mut self, data: &mut [u8]) {
+        self.enc.clone().encrypt(data);
+    }
+
+    /// Decrypt data in place.
+    fn decrypt(&mut self, data: &mut [u8]) {
+        self.dec.clone().decrypt(data);
+    }
+}
+
+impl SymmetricCipher for Aes256Cfb {
+    /// Encrypt data in place.
+    fn encrypt(&mut self, data: &mut [u8]) {
+        self.enc.clone().encrypt(data);
+    }
+
+    /// Decrypt data in place.
+    fn decrypt(&mut self, data: &mut [u8]) {
+        self.dec.clone().decrypt(data);
+    }
+}
+
+impl SymmetricCipher for Aes128Ctr {
+    /// Encrypt data in place.
+    fn encrypt(&mut self, data: &mut [u8]) {
+        StreamCipher::apply_keystream(self, data)
+    }
+
+    /// Decrypt data in place.
+    fn decrypt(&mut self, data: &mut [u8]) {
+        StreamCipher::apply_keystream(self, data)
+    }
+}
+
+impl SymmetricCipher for Aes192Ctr {
+    /// Encrypt data in place.
+    fn encrypt(&mut self, data: &mut [u8]) {
+        StreamCipher::apply_keystream(self, data)
+    }
+
+    /// Decrypt data in place.
+    fn decrypt(&mut self, data: &mut [u8]) {
+        StreamCipher::apply_keystream(self, data)
+    }
+}
+
+impl SymmetricCipher for Aes256Ctr {
     /// Encrypt data in place.
     fn encrypt(&mut self, data: &mut [u8]) {
         StreamCipher::apply_keystream(self, data)
@@ -137,13 +197,13 @@ impl Cipher {
         let key: &[u8] = &self.key;
         match self.cipher_method {
             CipherMethod::Aes128Cfb => {
-                Box::new(Aes128Cfb::new_from_slices(key, iv).expect("init cipher error"))
+                Box::new(Aes128Cfb::new(key, iv).expect("init cipher error"))
             }
             CipherMethod::Aes192Cfb => {
-                Box::new(Aes192Cfb::new_from_slices(key, iv).expect("init cipher error"))
+                Box::new(Aes192Cfb::new(key, iv).expect("init cipher error"))
             }
             CipherMethod::Aes256Cfb => {
-                Box::new(Aes256Cfb::new_from_slices(key, iv).expect("init cipher error"))
+                Box::new(Aes256Cfb::new(key, iv).expect("init cipher error"))
             }
             CipherMethod::Aes128Ctr => Box::new(Aes128Ctr::new(key.into(), iv.into())),
             CipherMethod::Aes192Ctr => Box::new(Aes192Ctr::new(key.into(), iv.into())),
