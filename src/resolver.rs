@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 
 use dns_resolver::Resolver;
-use rand::{thread_rng, Rng};
+use rand::{rng, Rng};
 
 use crate::util::other;
 
@@ -17,7 +17,9 @@ pub async fn resolve(host: &str) -> io::Result<IpAddr> {
     let resolver = GLOBAL_RESOLVER.get_or_init(Resolver::new);
     let results = resolver.lookup_host(host).await?;
     if !results.is_empty() {
-        return Ok(results[thread_rng().gen_range(0..results.len())]);
+        let mut r = rng();
+        let index = r.random_range(0..results.len());
+        return Ok(results[index]);
     }
     Err(other("resolve fail"))
 }

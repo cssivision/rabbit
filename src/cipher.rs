@@ -3,8 +3,8 @@ use cfb_mode::Cfb;
 use chacha20::ChaCha20;
 use cipher::{consts::U16, AsyncStreamCipher, BlockCipher, BlockEncrypt, NewCipher, StreamCipher};
 use ctr::Ctr128BE;
-use rand::distributions::Standard;
-use rand::{thread_rng, Rng};
+use rand::rng;
+use rand::Rng;
 
 use crate::util::generate_key;
 
@@ -107,8 +107,8 @@ impl Cipher {
 
     pub fn init_encrypt(&mut self) {
         if self.iv.is_empty() {
-            let rng = thread_rng();
-            self.iv = rng.sample_iter(&Standard).take(self.iv_len).collect();
+            self.iv = vec![0u8; self.iv_len];
+            rng().fill(&mut self.iv[..]);
         }
         self.enc = Some(self.new_cipher(&self.iv));
     }
