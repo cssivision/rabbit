@@ -7,8 +7,6 @@ use std::time::Duration;
 use awak::time::timeout;
 use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::util::other;
-
 pub mod v5 {
     pub const VERSION: u8 = 5;
     pub const METH_NO_AUTH: u8 = 0;
@@ -33,7 +31,7 @@ where
         conn.read_exact(buf1).await?;
 
         if buf1[0] != v5::VERSION {
-            return Err(other("unknown version"));
+            return Err(io::Error::other("unknown version"));
         }
 
         let buf2 = &mut vec![0u8; buf1[1] as usize];
@@ -46,11 +44,11 @@ where
         let buf4 = &mut [0u8; 3];
         conn.read_exact(buf4).await?;
         if buf4[0] != v5::VERSION {
-            return Err(other("didn't confirm with v5 version"));
+            return Err(io::Error::other("didn't confirm with v5 version"));
         }
         // checkout cmd
         if buf4[1] != v5::CMD_CONNECT {
-            return Err(other("unsupported command"));
+            return Err(io::Error::other("unsupported command"));
         }
         // there's one byte which is reserved for future use, so we read it and discard it.
 
@@ -112,7 +110,7 @@ where
                 let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                     hostname
                 } else {
-                    return Err(other("hostname include invalid utf8"));
+                    return Err(io::Error::other("hostname include invalid utf8"));
                 };
 
                 let pos = buf2.len() - 2;
@@ -127,7 +125,7 @@ where
             }
             n => {
                 let msg = format!("unknown address type, received: {n:?}");
-                Err(other(&msg))
+                Err(io::Error::other(msg))
             }
         };
         result

@@ -17,7 +17,7 @@ use socket2::SockAddr;
 use crate::cipher::Cipher;
 use crate::config::{self, Mode};
 use crate::io::{copy_bidirectional, write_all, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
-use crate::util::{generate_raw_addr, other};
+use crate::util::generate_raw_addr;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_UDP_BUFFER_SIZE: usize = 65536;
@@ -145,7 +145,8 @@ fn get_original_destination_addr(s: &TcpStream) -> io::Result<SocketAddr> {
             }
             Ok(())
         })?;
-        addr.as_socket().ok_or_else(|| other("invalid SocketAddr"))
+        addr.as_socket()
+            .ok_or_else(|| io::Error::other("invalid SocketAddr"))
     }
 }
 
@@ -247,7 +248,7 @@ async fn proxy_packet(
     cipher.decrypt(&mut recv_buf);
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
-        .map_err(|e| other(&format!("send fail: {e}")))?;
+        .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
 

@@ -20,7 +20,6 @@ use crate::io::{copy_bidirectional, read_exact, DEFAULT_CHECK_INTERVAL, DEFAULT_
 use crate::listener::Listener;
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
-use crate::util::other;
 
 const DEFAULT_GET_ADDR_INFO_TIMEOUT: Duration = Duration::from_secs(1);
 const DEFAULT_RESLOVE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -215,7 +214,7 @@ async fn proxy_packet(
     cipher.lock().unwrap().encrypt(&mut recv_buf);
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
-        .map_err(|e| other(&format!("send fail: {e}")))?;
+        .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
 
@@ -229,20 +228,20 @@ where
         get_addr_info(cipher.clone(), socket1),
     )
     .await
-    .map_err(|e| other(&format!("get addr info timeout: {e:?}")))?
-    .map_err(|e| other(&format!("get addr info fail: {e:?}")))?;
+    .map_err(|e| io::Error::other(format!("get addr info timeout: {e:?}")))?
+    .map_err(|e| io::Error::other(format!("get addr info fail: {e:?}")))?;
     log::debug!("proxy to address: {}:{}", host, port);
 
     let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host))
         .await
-        .map_err(|e| other(&format!("resolve timeout: {e:?}")))?
-        .map_err(|e| other(&format!("resolve fail: {e:?}")))?;
+        .map_err(|e| io::Error::other(format!("resolve timeout: {e:?}")))?
+        .map_err(|e| io::Error::other(format!("resolve fail: {e:?}")))?;
     log::debug!("resolver addr to ip: {}", addr);
 
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect((addr, port)))
         .await
-        .map_err(|e| other(&format!("connect timeout: {e:?}")))?
-        .map_err(|e| other(&format!("connect fail: {e:?}")))?;
+        .map_err(|e| io::Error::other(format!("connect timeout: {e:?}")))?
+        .map_err(|e| io::Error::other(format!("connect fail: {e:?}")))?;
     let _ = socket2.set_nodelay(true);
     log::debug!("connected to addr {}:{}", addr, port);
 
@@ -252,8 +251,8 @@ where
         DEFAULT_CHECK_INTERVAL,
     )
     .await
-    .map_err(|e| other(&format!("idle timeout: {e:?}")))?
-    .map_err(|e| other(&format!("copy bidirectional fail: {e:?}")))?;
+    .map_err(|e| io::Error::other(format!("idle timeout: {e:?}")))?
+    .map_err(|e| io::Error::other(format!("copy bidirectional fail: {e:?}")))?;
     log::debug!("proxy local => remote: {}, remote => local: {}", n1, n2);
     Ok((n1, n2))
 }
@@ -305,7 +304,7 @@ where
             let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                 hostname
             } else {
-                return Err(other("hostname include invalid utf8"));
+                return Err(io::Error::other("hostname include invalid utf8"));
             };
             let pos = buf2.len() - 2;
             let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
@@ -313,7 +312,7 @@ where
         }
         n => {
             log::error!("unknown address type, received: {:?}", n);
-            Err(other("unknown address type, received"))
+            Err(io::Error::other("unknown address type, received"))
         }
     }
 }

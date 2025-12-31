@@ -7,10 +7,6 @@ use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 
 static MD5_LENGTH: u32 = 16;
 
-pub fn other(desc: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, desc)
-}
-
 pub fn eof() -> io::Error {
     io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
 }
@@ -44,7 +40,7 @@ pub fn generate_raw_addr(host: &str, port: u16) -> Vec<u8> {
             rawaddr
         }
         _ => {
-            let dm_len = host.as_bytes().len();
+            let dm_len = host.len();
             let mut rawaddr = vec![TYPE_DOMAIN, dm_len as u8];
             rawaddr.extend_from_slice(host.as_bytes());
             rawaddr.extend_from_slice(&[((port >> 8) & 0xff) as u8, (port & 0xff) as u8]);
