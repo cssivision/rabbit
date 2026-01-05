@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use crate::cipher::Method;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -12,6 +14,7 @@ pub struct Config {
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
     #[default]
     Tcp,
@@ -23,7 +26,7 @@ pub enum Mode {
 pub struct Server {
     pub local_addr: Addr,
     pub password: String,
-    pub method: String,
+    pub method: Method,
     #[serde(default)]
     pub mode: Mode,
 }
@@ -33,7 +36,7 @@ pub struct Client {
     pub local_addr: Addr,
     pub server_addr: SocketAddr,
     pub password: String,
-    pub method: String,
+    pub method: Method,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,7 +44,7 @@ pub struct Redir {
     pub local_addr: SocketAddr,
     pub server_addr: SocketAddr,
     pub password: String,
-    pub method: String,
+    pub method: Method,
     #[serde(default)]
     pub mode: Mode,
     pub redir_addr: Option<SocketAddr>,

@@ -58,7 +58,7 @@ impl Service {
     }
 
     pub async fn stream_relay(&self) -> io::Result<()> {
-        let cipher = Cipher::new(&self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password);
         let listener = Listener::bind(self.config.local_addr.clone()).await?;
         log::info!("listening on {:?}", self.config.local_addr);
         loop {
@@ -87,7 +87,7 @@ impl Service {
     }
 
     pub async fn packet_relay(&self) -> io::Result<()> {
-        let cipher = Cipher::new(&self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password);
         let addr = match &self.config.local_addr {
             Addr::Path(addr) => {
                 return Err(io::Error::new(
