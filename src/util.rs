@@ -1,7 +1,10 @@
-use md5::compute;
 use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
+
+use hkdf::Hkdf;
+use md5::compute;
+use sha1::Sha1;
 
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 
@@ -9,6 +12,13 @@ static MD5_LENGTH: u32 = 16;
 
 pub fn eof() -> io::Error {
     io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
+}
+
+pub fn hkdf_sha1(secret: &[u8], salt: &[u8], info: &[u8], outkey: &mut [u8]) -> io::Result<()> {
+    let hk = Hkdf::<Sha1>::new(Some(salt), secret);
+    hk.expand(info, outkey)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(())
 }
 
 pub fn generate_key(data: &[u8], key_len: usize) -> Vec<u8> {

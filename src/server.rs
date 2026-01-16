@@ -10,16 +10,17 @@ use std::time::Duration;
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
-use awak::util::IdleTimeout;
+use awak::util::{copy_bidirectional, IdleTimeout};
 use futures_channel::mpsc::{channel, Receiver, Sender};
-use futures_util::{future::join, AsyncRead, AsyncWrite, Stream};
+use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream};
 
 use crate::cipher::Cipher;
 use crate::config::{self, Addr, Mode};
-use crate::io::{copy_bidirectional, read_exact, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
+use crate::CipherStream;
+use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_GET_ADDR_INFO_TIMEOUT: Duration = Duration::from_secs(1);
 const DEFAULT_RESLOVE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -182,8 +183,10 @@ async fn proxy_packet(
     let iv_len = cipher.iv_len();
     let cipher = Arc::new(Mutex::new(cipher));
 
+    let buf_slice = &mut buf.as_slice();
+    let mut socket = CipherStream::new(cipher.clone(), buf_slice);
     // get host and port.
-    let (n, host, port) = get_addr_info(cipher.clone(), &mut buf.as_slice()).await?;
+    let (n, host, port) = get_addr_info(&mut socket).await?;
     buf.drain(..n + iv_len);
     log::debug!("proxy to address: {}:{}", host, port);
 
@@ -197,7 +200,7 @@ async fn proxy_packet(
     };
 
     // decrypt recv data, dec already init in get_addr_info() function.
-    cipher.lock().unwrap().decrypt(&mut buf);
+    cipher.lock().unwrap().decrypt_in_place(&mut buf);
 
     // send to and recv from target.
     let socket = UdpSocket::bind(local)?;
@@ -211,7 +214,7 @@ async fn proxy_packet(
     if !cipher.lock().unwrap().is_encrypt_inited() {
         cipher.lock().unwrap().init_encrypt();
     }
-    cipher.lock().unwrap().encrypt(&mut recv_buf);
+    cipher.lock().unwrap().encrypt_in_place(&mut recv_buf);
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
@@ -222,14 +225,11 @@ async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let cipher = Arc::new(Mutex::new(cipher));
-    let (_, host, port) = timeout(
-        DEFAULT_GET_ADDR_INFO_TIMEOUT,
-        get_addr_info(cipher.clone(), socket1),
-    )
-    .await
-    .map_err(|e| io::Error::other(format!("get addr info timeout: {e:?}")))?
-    .map_err(|e| io::Error::other(format!("get addr info fail: {e:?}")))?;
+    let socket1 = &mut CipherStream::new(Arc::new(Mutex::new(cipher)), socket1);
+    let (_, host, port) = timeout(DEFAULT_GET_ADDR_INFO_TIMEOUT, get_addr_info(socket1))
+        .await
+        .map_err(|e| io::Error::other(format!("get addr info timeout: {e:?}")))?
+        .map_err(|e| io::Error::other(format!("get addr info fail: {e:?}")))?;
     log::debug!("proxy to address: {}:{}", host, port);
 
     let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host))
@@ -246,7 +246,7 @@ where
     log::debug!("connected to addr {}:{}", addr, port);
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional(&mut socket2, socket1, cipher),
+        copy_bidirectional(&mut socket2, socket1),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )
@@ -257,21 +257,18 @@ where
     Ok((n1, n2))
 }
 
-async fn get_addr_info<A>(
-    cipher: Arc<Mutex<Cipher>>,
-    conn: &mut A,
-) -> io::Result<(usize, String, u16)>
+async fn get_addr_info<A>(conn: &mut A) -> io::Result<(usize, String, u16)>
 where
     A: AsyncRead + Unpin + ?Sized,
 {
     let address_type = &mut [0u8; 1];
-    let _ = read_exact(cipher.clone(), conn, address_type).await?;
+    conn.read_exact(address_type).await?;
     match address_type.first() {
         // For IPv4 addresses, we read the 4 bytes for the address as
         // well as 2 bytes for the port.
         Some(&TYPE_IPV4) => {
             let buf = &mut [0u8; 6];
-            let _ = read_exact(cipher.clone(), conn, buf).await?;
+            conn.read_exact(buf).await?;
             let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
             let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
             Ok((7, format!("{addr}"), port))
@@ -280,7 +277,7 @@ where
         // bytes for a port, so we read that off and then keep going.
         Some(&TYPE_IPV6) => {
             let buf = &mut [0u8; 18];
-            let _ = read_exact(cipher.clone(), conn, buf).await?;
+            conn.read_exact(buf).await?;
             let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
             let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
             let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
@@ -297,9 +294,9 @@ where
         // IP addresses, but also arbitrary hostnames.
         Some(&TYPE_DOMAIN) => {
             let buf1 = &mut [0u8];
-            let _ = read_exact(cipher.clone(), conn, buf1).await?;
+            conn.read_exact(buf1).await?;
             let buf2 = &mut vec![0u8; buf1[0] as usize + 2];
-            let _ = read_exact(cipher.clone(), conn, buf2).await?;
+            conn.read_exact(buf2).await?;
             let hostname = &buf2[..buf2.len() - 2];
             let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
                 hostname

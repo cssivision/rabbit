@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::generate_key;
 
-pub trait CipherCore {
+trait CipherCore {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]);
+    fn encrypt_in_place(&mut self, _: &mut [u8]) {}
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]);
+    fn decrypt_in_place(&mut self, _: &mut [u8]) {}
 }
 
 struct Cfb<C: BlockCipher + BlockEncryptMut> {
@@ -54,84 +54,84 @@ impl Aes256Cfb {
 
 impl CipherCore for Aes128Cfb {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.enc.encrypt(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.dec.decrypt(data);
     }
 }
 
 impl CipherCore for Aes192Cfb {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.enc.encrypt(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.dec.decrypt(data);
     }
 }
 
 impl CipherCore for Aes256Cfb {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.enc.encrypt(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.dec.decrypt(data);
     }
 }
 
 impl CipherCore for Aes128Ctr {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 }
 
 impl CipherCore for Aes192Ctr {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 }
 
 impl CipherCore for Aes256Ctr {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 }
 
 impl CipherCore for ChaCha20 {
     /// Encrypt data in place.
-    fn encrypt(&mut self, data: &mut [u8]) {
+    fn encrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 
     /// Decrypt data in place.
-    fn decrypt(&mut self, data: &mut [u8]) {
+    fn decrypt_in_place(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
     }
 }
@@ -166,14 +166,14 @@ pub enum Method {
 
 impl Cipher {
     pub fn new(method: Method, password: &str) -> Cipher {
-        let (key_len, cipher_method, iv_len) = match method {
-            Method::Aes128Cfb => (16, Method::Aes128Cfb, 16),
-            Method::Aes192Cfb => (24, Method::Aes192Cfb, 16),
-            Method::Aes256Cfb => (32, Method::Aes256Cfb, 16),
-            Method::Aes128Ctr => (16, Method::Aes128Ctr, 16),
-            Method::Aes192Ctr => (24, Method::Aes192Ctr, 16),
-            Method::Aes256Ctr => (32, Method::Aes256Ctr, 16),
-            Method::ChaCha20 => (32, Method::ChaCha20, 12),
+        let (key_len, iv_len) = match method {
+            Method::Aes128Cfb => (16, 16),
+            Method::Aes192Cfb => (24, 16),
+            Method::Aes256Cfb => (32, 16),
+            Method::Aes128Ctr => (16, 16),
+            Method::Aes192Ctr => (24, 16),
+            Method::Aes256Ctr => (32, 16),
+            Method::ChaCha20 => (32, 12),
         };
 
         let key = generate_key(password.as_bytes(), key_len);
@@ -184,7 +184,7 @@ impl Cipher {
             iv: vec![0u8; iv_len],
             enc: None,
             dec: None,
-            cipher_method,
+            cipher_method: method,
         }
     }
 
@@ -233,15 +233,15 @@ impl Cipher {
         self.dec = Some(self.new_cipher(&self.iv));
     }
 
-    pub fn encrypt(&mut self, input: &mut [u8]) {
+    pub fn encrypt_in_place(&mut self, input: &mut [u8]) {
         if let Some(enc) = &mut self.enc {
-            enc.encrypt(input);
+            enc.encrypt_in_place(input);
         }
     }
 
-    pub fn decrypt(&mut self, input: &mut [u8]) {
+    pub fn decrypt_in_place(&mut self, input: &mut [u8]) {
         if let Some(dec) = &mut self.dec {
-            dec.decrypt(input)
+            dec.decrypt_in_place(input)
         }
     }
 

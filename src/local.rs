@@ -5,15 +5,16 @@ use std::time::Duration;
 
 use awak::net::TcpStream;
 use awak::time::timeout;
-use awak::util::IdleTimeout;
-use futures_util::{AsyncRead, AsyncWrite};
+use awak::util::{copy_bidirectional, IdleTimeout};
+use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::cipher::Cipher;
 use crate::config;
-use crate::io::{copy_bidirectional, write_all, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 use crate::listener::Listener;
 use crate::socks5;
 use crate::util::generate_raw_addr;
+use crate::CipherStream;
+use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -75,19 +76,19 @@ async fn proxy<A>(
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let cipher = Arc::new(Mutex::new(cipher));
-
     let (host, port) = socks5::handshake(socket1, Duration::from_secs(3)).await?;
     log::debug!("proxy to address: {}:{}", host, port);
 
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
 
+    let mut socket2 = CipherStream::new(Arc::new(Mutex::new(cipher)), &mut socket2);
+
     let rawaddr = generate_raw_addr(&host, port);
-    write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
+    socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional(socket1, &mut socket2, cipher),
+        copy_bidirectional(socket1, &mut socket2),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )
