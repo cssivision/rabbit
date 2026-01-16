@@ -148,6 +148,7 @@ where
                     Poll::Pending => {
                         if read_done {
                             if need_flush {
+                                need_flush = false;
                                 ready!(Pin::new(&mut me.stream).poll_flush(cx))?;
                                 continue;
                             }
