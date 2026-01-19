@@ -14,13 +14,11 @@ use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
+use std::time::Duration;
 
 use futures_util::{AsyncRead, AsyncWrite};
 
 use cipher::Cipher;
-use util::eof;
-
-use std::time::Duration;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 pub const DEFAULT_CHECK_INTERVAL: Duration = Duration::from_secs(3);
@@ -87,7 +85,7 @@ where
                     Pin::new(&mut me.stream).poll_read(cx, &mut cipher.iv_mut()[reader.pos..])
                 )?;
                 if n == 0 {
-                    return Err(eof()).into();
+                    return Poll::Ready(Ok(0));
                 }
                 reader.pos += n;
             }
@@ -107,7 +105,7 @@ where
             }
             let n = ready!(Pin::new(&mut me.stream).poll_read(cx, &mut reader.buf[..]))?;
             if n == 0 {
-                return Err(eof()).into();
+                return Poll::Ready(Ok(0));
             }
             reader.pos = 0;
             reader.cap = n;
@@ -142,8 +140,9 @@ where
         loop {
             // If our buffer has some data, let's write it out!
             while writer.pos < writer.cap {
-                let i = ready!(Pin::new(&mut me.stream)
-                    .poll_write(cx, &writer.buf[writer.pos..writer.cap]))?;
+                let i =
+                    ready!(Pin::new(&mut me.stream)
+                        .poll_write(cx, &writer.buf[writer.pos..writer.cap]))?;
                 if i == 0 {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::WriteZero,
