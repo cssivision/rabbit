@@ -44,6 +44,7 @@ struct Writer {
     inited: bool,
     pos: usize,
     cap: usize,
+    read_done: bool,
 }
 
 impl<'a, A: ?Sized> CipherStream<'a, A> {
@@ -62,6 +63,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 inited: false,
                 pos: 0,
                 cap: 0,
+                read_done: false,
             },
         }
     }
@@ -137,27 +139,11 @@ where
             writer.buf[..n].copy_from_slice(cipher.iv());
         }
 
-        let mut read_done = false;
-        let mut need_flush = false;
         loop {
             // If our buffer has some data, let's write it out!
             while writer.pos < writer.cap {
-                let i = match Pin::new(&mut me.stream)
-                    .poll_write(cx, &writer.buf[writer.pos..writer.cap])
-                {
-                    Poll::Pending => {
-                        if read_done {
-                            if need_flush {
-                                need_flush = false;
-                                ready!(Pin::new(&mut me.stream).poll_flush(cx))?;
-                                continue;
-                            }
-                            return Poll::Ready(Ok(writer.cap));
-                        }
-                        return Poll::Pending;
-                    }
-                    Poll::Ready(v) => v?,
-                };
+                let i = ready!(Pin::new(&mut me.stream)
+                    .poll_write(cx, &writer.buf[writer.pos..writer.cap]))?;
                 if i == 0 {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::WriteZero,
@@ -165,11 +151,11 @@ where
                     )));
                 } else {
                     writer.pos += i;
-                    need_flush = true;
                 }
             }
 
-            if writer.pos == writer.cap && read_done {
+            if writer.pos == writer.cap && writer.read_done {
+                writer.read_done = false;
                 return Poll::Ready(Ok(writer.cap));
             }
 
@@ -180,28 +166,12 @@ where
             writer.buf[..n].copy_from_slice(buf);
             let mut cipher = me.cipher.lock().unwrap();
             cipher.encrypt_in_place(&mut writer.buf[..n]);
-            read_done = true;
+            writer.read_done = true;
         }
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let me = &mut *self;
-        let writer = &mut me.writer;
-        // If our buffer has some data, let's write it out!
-        while writer.pos < writer.cap {
-            let i = ready!(
-                Pin::new(&mut me.stream).poll_write(cx, &writer.buf[writer.pos..writer.cap])
-            )?;
-            if i == 0 {
-                return Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "write zero byte into writer",
-                )));
-            } else {
-                writer.pos += i;
-            }
-        }
-        Pin::new(&mut me.stream).poll_flush(cx)
+        Pin::new(&mut self.stream).poll_flush(cx)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
