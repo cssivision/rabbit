@@ -110,7 +110,7 @@ where
             reader.pos = 0;
             reader.cap = n;
             let mut cipher = me.cipher.lock().unwrap();
-            cipher.decrypt_in_place(&mut reader.buf[..n]);
+            cipher.decrypt_in_place(&mut reader.buf[..n])?;
         }
     }
 }
@@ -164,7 +164,7 @@ where
             writer.buf.resize(n, 0u8);
             writer.buf[..n].copy_from_slice(buf);
             let mut cipher = me.cipher.lock().unwrap();
-            cipher.encrypt_in_place(&mut writer.buf[..n]);
+            cipher.encrypt_in_place(&mut writer.buf[..n])?;
             writer.read_done = true;
         }
     }

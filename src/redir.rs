@@ -234,7 +234,7 @@ async fn proxy_packet(
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
     data.extend_from_slice(&buf);
-    cipher.encrypt_in_place(&mut data[cipher.iv_len()..]);
+    cipher.encrypt_in_place(&mut data[cipher.iv_len()..])?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
@@ -246,7 +246,7 @@ async fn proxy_packet(
     recv_buf.truncate(n);
 
     cipher.init_decrypt();
-    cipher.decrypt_in_place(&mut recv_buf);
+    cipher.decrypt_in_place(&mut recv_buf)?;
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;

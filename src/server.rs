@@ -200,7 +200,7 @@ async fn proxy_packet(
     };
 
     // decrypt recv data, dec already init in get_addr_info() function.
-    cipher.lock().unwrap().decrypt_in_place(&mut buf);
+    cipher.lock().unwrap().decrypt_in_place(&mut buf)?;
 
     // send to and recv from target.
     let socket = UdpSocket::bind(local)?;
@@ -214,7 +214,7 @@ async fn proxy_packet(
     if !cipher.lock().unwrap().is_encrypt_inited() {
         cipher.lock().unwrap().init_encrypt();
     }
-    cipher.lock().unwrap().encrypt_in_place(&mut recv_buf);
+    cipher.lock().unwrap().encrypt_in_place(&mut recv_buf)?;
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
