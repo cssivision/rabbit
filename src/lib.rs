@@ -182,10 +182,10 @@ impl AeadReader {
                     self.payload_size =
                         u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize & PAYLOAD_SIZE_MASK;
                     self.pos = 0;
-                    self.buf.resize(self.payload_size, 0u8);
                     self.state = AeadReaderState::Payload;
                 }
                 AeadReaderState::Payload => {
+                    self.buf.resize(self.payload_size + self.tag_size, 0u8);
                     while self.pos < self.payload_size + self.tag_size {
                         let n =
                             ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
@@ -195,7 +195,7 @@ impl AeadReader {
                         self.pos += n;
                     }
                     let mut cipher = cipher.lock().unwrap();
-                    cipher.decrypt_in_place(&mut self.buf[..self.payload_size])?;
+                    cipher.decrypt_in_place(&mut self.buf[..self.payload_size + self.tag_size])?;
                     self.pos = 0;
                     self.state = AeadReaderState::PayloadSize;
                     return Poll::Ready(Ok(self.buf[..self.payload_size].to_vec()));
@@ -306,7 +306,7 @@ where
 
             if writer.pos == writer.cap && writer.read_done {
                 writer.read_done = false;
-                return Poll::Ready(Ok(writer.cap));
+                return Poll::Ready(Ok(buf.len()));
             }
 
             let mut cipher = me.cipher.lock().unwrap();
