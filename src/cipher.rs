@@ -33,113 +33,60 @@ type Aes128Ctr = Ctr128BE<Aes128>;
 type Aes192Ctr = Ctr128BE<Aes192>;
 type Aes256Ctr = Ctr128BE<Aes256>;
 
-impl Aes128Cfb {
-    fn new(key: &[u8], iv: &[u8]) -> Aes128Cfb {
-        let enc = cfb_mode::BufEncryptor::<Aes128>::new(key.into(), iv.into());
-        let dec = cfb_mode::BufDecryptor::<Aes128>::new(key.into(), iv.into());
-        Aes128Cfb { enc, dec }
-    }
+type Aes128Gcm = AesGcm<aes_gcm::Aes128Gcm>;
+type Aes256Gcm = AesGcm<aes_gcm::Aes256Gcm>;
+
+macro_rules! impl_cfb {
+    ($name:ident, $cipher:ty) => {
+        impl $name {
+            fn new(key: &[u8], iv: &[u8]) -> $name {
+                let enc = cfb_mode::BufEncryptor::<$cipher>::new(key.into(), iv.into());
+                let dec = cfb_mode::BufDecryptor::<$cipher>::new(key.into(), iv.into());
+                $name { enc, dec }
+            }
+        }
+
+        impl CipherCore for $name {
+            /// Encrypt data in place.
+            fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+                self.enc.encrypt(data);
+                Ok(())
+            }
+
+            /// Decrypt data in place.
+            fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+                self.dec.decrypt(data);
+                Ok(())
+            }
+        }
+    };
 }
 
-impl Aes192Cfb {
-    fn new(key: &[u8], iv: &[u8]) -> Aes192Cfb {
-        let enc = cfb_mode::BufEncryptor::<Aes192>::new(key.into(), iv.into());
-        let dec = cfb_mode::BufDecryptor::<Aes192>::new(key.into(), iv.into());
-        Aes192Cfb { enc, dec }
-    }
+impl_cfb!(Aes128Cfb, Aes128);
+impl_cfb!(Aes192Cfb, Aes192);
+impl_cfb!(Aes256Cfb, Aes256);
+
+macro_rules! impl_ctr {
+    ($name:ident) => {
+        impl CipherCore for $name {
+            /// Encrypt data in place.
+            fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+                self.apply_keystream(data);
+                Ok(())
+            }
+
+            /// Decrypt data in place.
+            fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+                self.apply_keystream(data);
+                Ok(())
+            }
+        }
+    };
 }
 
-impl Aes256Cfb {
-    fn new(key: &[u8], iv: &[u8]) -> Aes256Cfb {
-        let enc = cfb_mode::BufEncryptor::<Aes256>::new(key.into(), iv.into());
-        let dec = cfb_mode::BufDecryptor::<Aes256>::new(key.into(), iv.into());
-        Aes256Cfb { enc, dec }
-    }
-}
-
-impl CipherCore for Aes128Cfb {
-    /// Encrypt data in place.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.enc.encrypt(data);
-        Ok(())
-    }
-
-    /// Decrypt data in place.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.dec.decrypt(data);
-        Ok(())
-    }
-}
-
-impl CipherCore for Aes192Cfb {
-    /// Encrypt data in place.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.enc.encrypt(data);
-        Ok(())
-    }
-
-    /// Decrypt data in place.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.dec.decrypt(data);
-        Ok(())
-    }
-}
-
-impl CipherCore for Aes256Cfb {
-    /// Encrypt data in place.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.enc.encrypt(data);
-        Ok(())
-    }
-
-    /// Decrypt data in place.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.dec.decrypt(data);
-        Ok(())
-    }
-}
-
-impl CipherCore for Aes128Ctr {
-    /// Encrypt data in place.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.apply_keystream(data);
-        Ok(())
-    }
-
-    /// Decrypt data in place.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.apply_keystream(data);
-        Ok(())
-    }
-}
-
-impl CipherCore for Aes192Ctr {
-    /// Encrypt data in place.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.apply_keystream(data);
-        Ok(())
-    }
-
-    /// Decrypt data in place.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.apply_keystream(data);
-        Ok(())
-    }
-}
-
-impl CipherCore for Aes256Ctr {
-    /// Encrypt data in place.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.apply_keystream(data);
-        Ok(())
-    }
-
-    /// Decrypt data in place.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        self.apply_keystream(data);
-        Ok(())
-    }
-}
+impl_ctr!(Aes128Ctr);
+impl_ctr!(Aes192Ctr);
+impl_ctr!(Aes256Ctr);
 
 impl CipherCore for ChaCha20 {
     /// Encrypt data in place.
@@ -176,15 +123,15 @@ impl<G> AesGcm<G>
 where
     G: AeadInPlace + KeyInit,
 {
-    fn new(key: &[u8], iv: &[u8]) -> AesGcm<G> {
-        // Use HKDF-SHA1 to derive subkey from key and iv (as salt)
+    fn new(key: &[u8], salt: &[u8]) -> AesGcm<G> {
+        // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
-        hkdf_sha1(key, iv, b"ss-subkey", &mut subkey)
+        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey)
             .expect("HKDF-SHA1 key derivation failed");
         let key = Key::<G>::from_slice(&subkey);
         AesGcm {
-            inner: G::new(&key),
-            nonce: iv.to_vec(),
+            inner: G::new(key),
+            nonce: salt.to_vec(),
         }
     }
 }
@@ -218,7 +165,7 @@ where
         let nonce = Nonce::from_slice(&self.nonce);
         // Use encrypt_in_place: it will encrypt buffer and append tag
         // After encryption: buffer contains [ciphertext][tag]
-        match self.inner.encrypt_in_place(&nonce, &[], &mut buffer) {
+        match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
             Ok(()) => {
                 // encrypt_in_place appends the tag to the buffer
                 // buffer now contains [ciphertext][tag], total length = plaintext_len + 16
@@ -256,7 +203,7 @@ where
         // Use decrypt_in_place: it will decrypt buffer and verify the tag
         // The buffer layout: [ciphertext][tag]
         // After decryption: buffer contains [plaintext] (tag is consumed/verified)
-        match self.inner.decrypt_in_place(&nonce, &[], &mut buffer) {
+        match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
             Ok(()) => {
                 // decrypt_in_place verifies the tag and decrypts in place
                 // The plaintext is now in buffer, copy it back to data
@@ -345,14 +292,23 @@ impl Cipher {
         self.enc = Some(self.new_cipher(&self.iv));
     }
 
+    /// Get the IV (or salt for GCM methods).
+    /// For GCM methods (AES-128-GCM, AES-256-GCM), this returns the salt.
+    /// For other methods, this returns the IV.
     pub fn iv(&self) -> &[u8] {
         &self.iv
     }
 
+    /// Get the length of IV (or salt for GCM methods).
+    /// For GCM methods (AES-128-GCM, AES-256-GCM), this returns the salt length.
+    /// For other methods, this returns the IV length.
     pub fn iv_len(&self) -> usize {
         self.iv_len
     }
 
+    /// Get mutable reference to the IV (or salt for GCM methods).
+    /// For GCM methods (AES-128-GCM, AES-256-GCM), this is the salt.
+    /// For other methods, this is the IV.
     pub fn iv_mut(&mut self) -> &mut [u8] {
         &mut self.iv[..]
     }
@@ -365,18 +321,19 @@ impl Cipher {
         self.dec.is_some()
     }
 
-    fn new_cipher(&self, iv: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
+    fn new_cipher(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
         match self.cipher_method {
-            Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, iv)),
-            Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, iv)),
-            Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, iv)),
-            Method::Aes128Ctr => Box::new(Aes128Ctr::new(key.into(), iv.into())),
-            Method::Aes192Ctr => Box::new(Aes192Ctr::new(key.into(), iv.into())),
-            Method::Aes256Ctr => Box::new(Aes256Ctr::new(key.into(), iv.into())),
-            Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv.into())),
-            Method::Aes128Gcm => Box::new(AesGcm::<aes_gcm::Aes128Gcm>::new(key, iv)),
-            Method::Aes256Gcm => Box::new(AesGcm::<aes_gcm::Aes256Gcm>::new(key, iv)),
+            Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, iv_or_salt)),
+            Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, iv_or_salt)),
+            Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, iv_or_salt)),
+            Method::Aes128Ctr => Box::new(Aes128Ctr::new(key.into(), iv_or_salt.into())),
+            Method::Aes192Ctr => Box::new(Aes192Ctr::new(key.into(), iv_or_salt.into())),
+            Method::Aes256Ctr => Box::new(Aes256Ctr::new(key.into(), iv_or_salt.into())),
+            Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv_or_salt.into())),
+            // For GCM methods, iv_or_salt is actually salt
+            Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, iv_or_salt)),
+            Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, iv_or_salt)),
         }
     }
 
@@ -388,10 +345,7 @@ impl Cipher {
         if let Some(enc) = &mut self.enc {
             enc.encrypt_in_place(input)
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "encryption not initialized",
-            ))
+            Err(io::Error::other("encryption not initialized"))
         }
     }
 
@@ -399,10 +353,7 @@ impl Cipher {
         if let Some(dec) = &mut self.dec {
             dec.decrypt_in_place(input)
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "decryption not initialized",
-            ))
+            Err(io::Error::other("decryption not initialized"))
         }
     }
 
