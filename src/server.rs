@@ -180,7 +180,7 @@ async fn proxy_packet(
     peer_addr: SocketAddr,
     mut sender: Sender<(Vec<u8>, SocketAddr)>,
 ) -> io::Result<(u64, u64)> {
-    let iv_len = cipher.iv_len();
+    let iv_len = cipher.iv_or_salt_len();
     let cipher = Arc::new(Mutex::new(cipher));
 
     let buf_slice = &mut buf.as_slice();

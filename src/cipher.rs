@@ -1,12 +1,11 @@
 use std::io;
 
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::{
-    aead::AeadInPlace, Key, KeyInit, Nonce,
-};
+use aes_gcm::{aead::AeadInPlace, Nonce};
 use chacha20::ChaCha20;
-use cipher::{BlockCipher, BlockEncryptMut, KeyIvInit, StreamCipher};
+use cipher::{consts::U12, BlockCipher, BlockEncryptMut, Key, KeyInit, KeyIvInit, StreamCipher};
 use ctr::Ctr128BE;
+
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +33,9 @@ type Aes192Ctr = Ctr128BE<Aes192>;
 type Aes256Ctr = Ctr128BE<Aes256>;
 
 type Aes128Gcm = AesGcm<aes_gcm::Aes128Gcm>;
+type Aes192Gcm = AesGcm<aes_gcm::AesGcm<aes::Aes192, U12>>;
 type Aes256Gcm = AesGcm<aes_gcm::Aes256Gcm>;
+type ChaCha20IetfPoly1305 = ChaCha20Poly1305;
 
 macro_rules! impl_cfb {
     ($name:ident, $cipher:ty) => {
@@ -126,16 +127,14 @@ where
     fn new(key: &[u8], salt: &[u8]) -> AesGcm<G> {
         // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
-        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey)
-            .expect("HKDF-SHA1 key derivation failed");
+        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
         let key = Key::<G>::from_slice(&subkey);
         AesGcm {
             inner: G::new(key),
-            nonce: salt.to_vec(),
+            nonce: vec![0u8; 12],
         }
     }
 }
-
 
 impl<G> CipherCore for AesGcm<G>
 where
@@ -161,7 +160,7 @@ where
 
         // Convert to Vec for encrypt_in_place (which requires Buffer trait)
         let mut buffer = plaintext_slice.to_vec();
-        
+
         let nonce = Nonce::from_slice(&self.nonce);
         // Use encrypt_in_place: it will encrypt buffer and append tag
         // After encryption: buffer contains [ciphertext][tag]
@@ -226,14 +225,103 @@ where
     }
 }
 
+struct ChaCha20Poly1305 {
+    inner: chacha20poly1305::ChaCha20Poly1305,
+    nonce: Vec<u8>,
+}
+
+impl ChaCha20Poly1305 {
+    fn new(key: &[u8], salt: &[u8]) -> ChaCha20Poly1305 {
+        // Use HKDF-SHA1 to derive subkey from key and salt
+        let mut subkey = vec![0u8; key.len()];
+        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
+        let key = chacha20poly1305::Key::from_slice(&subkey);
+        ChaCha20Poly1305 {
+            inner: chacha20poly1305::ChaCha20Poly1305::new(key),
+            nonce: vec![0u8; 12],
+        }
+    }
+}
+
+impl CipherCore for ChaCha20Poly1305 {
+    /// Encrypt data in place.
+    /// Note: For ChaCha20-Poly1305, the buffer must have at least 16 bytes of extra space
+    /// after the plaintext to store the authentication tag.
+    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        if data.len() < 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer too small for Poly1305 tag",
+            ));
+        }
+        let plaintext_len = data.len() - 16;
+        let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
+
+        // Convert to Vec for encrypt_in_place (which requires Buffer trait)
+        let mut buffer = plaintext_slice.to_vec();
+
+        let nonce = chacha20poly1305::Nonce::from_slice(&self.nonce);
+        match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
+            Ok(()) => {
+                if buffer.len() == plaintext_len + 16 {
+                    plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
+                    tag_space.copy_from_slice(&buffer[plaintext_len..]);
+                    increment_nonce(&mut self.nonce);
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "ChaCha20-Poly1305 encryption output length mismatch",
+                    ))
+                }
+            }
+            Err(e) => Err(io::Error::other(format!(
+                "ChaCha20-Poly1305 encryption failed: {e}"
+            ))),
+        }
+    }
+
+    /// Decrypt data in place.
+    /// Note: For ChaCha20-Poly1305, the last 16 bytes are assumed to be the authentication tag.
+    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        if data.len() < 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer too small for Poly1305 tag",
+            ));
+        }
+        let mut buffer = data.to_vec();
+
+        let nonce = chacha20poly1305::Nonce::from_slice(&self.nonce);
+        match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
+            Ok(()) => {
+                let plaintext_len = buffer.len();
+                if plaintext_len <= data.len() {
+                    data[..plaintext_len].copy_from_slice(&buffer);
+                    increment_nonce(&mut self.nonce);
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "ChaCha20-Poly1305 decryption output length mismatch",
+                    ))
+                }
+            }
+            Err(e) => Err(io::Error::other(format!(
+                "ChaCha20-Poly1305 decryption failed (authentication failed): {e}"
+            ))),
+        }
+    }
+}
+
 pub struct Cipher {
     key: Vec<u8>,
     key_len: usize,
-    iv: Vec<u8>,
-    iv_len: usize,
+    iv_or_salt: Vec<u8>,
+    iv_or_salt_len: usize,
     enc: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
     dec: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
-    cipher_method: Method,
+    method: Method,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -254,13 +342,17 @@ pub enum Method {
     ChaCha20,
     #[serde(rename = "aes-128-gcm")]
     Aes128Gcm,
+    #[serde(rename = "aes-192-gcm")]
+    Aes192Gcm,
     #[serde(rename = "aes-256-gcm")]
     Aes256Gcm,
+    #[serde(rename = "chacha20-ietf-poly1305")]
+    ChaCha20IetfPoly1305,
 }
 
 impl Cipher {
     pub fn new(method: Method, password: &str) -> Cipher {
-        let (key_len, iv_len) = match method {
+        let (key_len, iv_or_salt_len) = match method {
             Method::Aes128Cfb => (16, 16),
             Method::Aes192Cfb => (24, 16),
             Method::Aes256Cfb => (32, 16),
@@ -268,49 +360,51 @@ impl Cipher {
             Method::Aes192Ctr => (24, 16),
             Method::Aes256Ctr => (32, 16),
             Method::ChaCha20 => (32, 12),
-            Method::Aes128Gcm => (16, 12),
-            Method::Aes256Gcm => (32, 12),
+            Method::Aes128Gcm => (16, 16),
+            Method::Aes192Gcm => (24, 24),
+            Method::Aes256Gcm => (32, 32),
+            Method::ChaCha20IetfPoly1305 => (32, 32),
         };
 
         let key = generate_key(password.as_bytes(), key_len);
         Cipher {
             key: Vec::from(&key[..]),
             key_len,
-            iv_len,
-            iv: vec![0u8; iv_len],
+            iv_or_salt_len,
+            iv_or_salt: vec![0u8; iv_or_salt_len],
             enc: None,
             dec: None,
-            cipher_method: method,
+            method,
         }
     }
 
     pub fn init_encrypt(&mut self) {
-        if self.iv.is_empty() {
-            self.iv = vec![0u8; self.iv_len];
-            rand::rng().fill(&mut self.iv[..]);
+        if self.iv_or_salt.is_empty() {
+            self.iv_or_salt = vec![0u8; self.iv_or_salt_len];
+            rand::rng().fill(&mut self.iv_or_salt[..]);
         }
-        self.enc = Some(self.new_cipher(&self.iv));
+        self.enc = Some(self.new_cipher(&self.iv_or_salt));
     }
 
     /// Get the IV (or salt for GCM methods).
-    /// For GCM methods (AES-128-GCM, AES-256-GCM), this returns the salt.
+    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM), this returns the salt.
     /// For other methods, this returns the IV.
-    pub fn iv(&self) -> &[u8] {
-        &self.iv
+    pub fn iv_or_salt(&self) -> &[u8] {
+        &self.iv_or_salt
     }
 
-    /// Get the length of IV (or salt for GCM methods).
-    /// For GCM methods (AES-128-GCM, AES-256-GCM), this returns the salt length.
+    /// Get the length of IV (or salt for GCM/ChaCha20-Poly1305 methods).
+    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM) and ChaCha20-Poly1305, this returns the salt length.
     /// For other methods, this returns the IV length.
-    pub fn iv_len(&self) -> usize {
-        self.iv_len
+    pub fn iv_or_salt_len(&self) -> usize {
+        self.iv_or_salt_len
     }
 
-    /// Get mutable reference to the IV (or salt for GCM methods).
-    /// For GCM methods (AES-128-GCM, AES-256-GCM), this is the salt.
+    /// Get mutable reference to the IV (or salt for GCM/ChaCha20-Poly1305 methods).
+    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM) and ChaCha20-Poly1305, this is the salt.
     /// For other methods, this is the IV.
     pub fn iv_mut(&mut self) -> &mut [u8] {
-        &mut self.iv[..]
+        &mut self.iv_or_salt[..]
     }
 
     pub fn is_encrypt_inited(&self) -> bool {
@@ -323,7 +417,7 @@ impl Cipher {
 
     fn new_cipher(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
-        match self.cipher_method {
+        match self.method {
             Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, iv_or_salt)),
             Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, iv_or_salt)),
             Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, iv_or_salt)),
@@ -333,12 +427,25 @@ impl Cipher {
             Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv_or_salt.into())),
             // For GCM methods, iv_or_salt is actually salt
             Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, iv_or_salt)),
+            Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, iv_or_salt)),
             Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, iv_or_salt)),
+            // For ChaCha20-Poly1305, iv_or_salt is actually salt
+            Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, iv_or_salt)),
         }
     }
 
     pub fn init_decrypt(&mut self) {
-        self.dec = Some(self.new_cipher(&self.iv));
+        self.dec = Some(self.new_cipher(&self.iv_or_salt));
+    }
+
+    pub fn is_aead(&self) -> bool {
+        matches!(
+            self.method,
+            Method::Aes128Gcm
+                | Method::Aes192Gcm
+                | Method::Aes256Gcm
+                | Method::ChaCha20IetfPoly1305
+        )
     }
 
     pub fn encrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {
@@ -361,12 +468,12 @@ impl Cipher {
     pub fn reset(&self) -> Cipher {
         Cipher {
             key: self.key.clone(),
-            iv: vec![0u8; self.iv_len],
-            iv_len: self.iv_len,
+            iv_or_salt: vec![0u8; self.iv_or_salt_len],
+            iv_or_salt_len: self.iv_or_salt_len,
             key_len: self.key_len,
             enc: None,
             dec: None,
-            cipher_method: self.cipher_method,
+            method: self.method,
         }
     }
 }

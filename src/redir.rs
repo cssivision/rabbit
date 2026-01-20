@@ -230,11 +230,11 @@ async fn proxy_packet(
         unimplemented!()
     };
     cipher.init_encrypt();
-    let mut data = cipher.iv().to_vec();
+    let mut data = cipher.iv_or_salt().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
     data.extend_from_slice(&buf);
-    cipher.encrypt_in_place(&mut data[cipher.iv_len()..])?;
+    cipher.encrypt_in_place(&mut data[cipher.iv_or_salt_len()..])?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
