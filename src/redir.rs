@@ -3,7 +3,6 @@ use std::io;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
@@ -262,8 +261,6 @@ async fn proxy<A>(
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let cipher = Arc::new(Mutex::new(cipher));
-
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
     let mut socket2 = CipherStream::new(cipher, &mut socket2);

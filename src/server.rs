@@ -4,7 +4,6 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 use std::str;
-use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
@@ -238,7 +237,7 @@ async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let socket1 = &mut CipherStream::new(Arc::new(Mutex::new(cipher)), socket1);
+    let socket1 = &mut CipherStream::new(cipher, socket1);
     let (_, host, port) = timeout(DEFAULT_GET_ADDR_INFO_TIMEOUT, get_addr_info(socket1))
         .await
         .map_err(|e| io::Error::other(format!("get addr info timeout: {e:?}")))?

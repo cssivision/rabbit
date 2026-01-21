@@ -78,8 +78,10 @@ struct Writer {
 }
 
 impl<'a, A: ?Sized> CipherStream<'a, A> {
-    pub fn new(cipher: Arc<Mutex<Cipher>>, stream: &'a mut A) -> Self {
-        let is_aead = cipher.lock().unwrap().is_aead();
+    pub fn new(cipher: Cipher, stream: &'a mut A) -> Self {
+        let is_aead = cipher.is_aead();
+        let tag_size = cipher.tag_size();
+        let cipher = Arc::new(Mutex::new(cipher));
         CipherStream {
             stream,
             cipher,
@@ -93,7 +95,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                         buf: vec![0u8; 4096],
                         pos: 0,
                         payload_size: 0,
-                        tag_size: 16,
+                        tag_size,
                         state: AeadReaderState::PayloadSize,
                     })
                 } else {
@@ -107,7 +109,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 cap: 0,
                 read_done: false,
                 aead: if is_aead {
-                    Some(AeadWriter { tag_size: 16 })
+                    Some(AeadWriter { tag_size })
                 } else {
                     None
                 },

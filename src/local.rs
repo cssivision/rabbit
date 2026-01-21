@@ -1,6 +1,5 @@
 use std::io;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use awak::net::TcpStream;
@@ -82,7 +81,7 @@ where
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
 
-    let mut socket2 = CipherStream::new(Arc::new(Mutex::new(cipher)), &mut socket2);
+    let mut socket2 = CipherStream::new(cipher, &mut socket2);
 
     let rawaddr = generate_raw_addr(&host, port);
     socket2.write_all(&rawaddr).await?;
