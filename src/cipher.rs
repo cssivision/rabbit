@@ -2,7 +2,7 @@ use std::io;
 
 use aes::{Aes128, Aes192, Aes256};
 use aes_gcm::{aead::AeadInPlace, Nonce};
-use chacha20::ChaCha20;
+use camellia::{Camellia128, Camellia192, Camellia256};
 use cipher::{consts::U12, BlockCipher, BlockEncryptMut, Key, KeyInit, KeyIvInit, StreamCipher};
 use ctr::Ctr128BE;
 
@@ -28,6 +28,10 @@ type Aes128Cfb = Cfb<Aes128>;
 type Aes192Cfb = Cfb<Aes192>;
 type Aes256Cfb = Cfb<Aes256>;
 
+type Camellia128Cfb = Cfb<Camellia128>;
+type Camellia192Cfb = Cfb<Camellia192>;
+type Camellia256Cfb = Cfb<Camellia256>;
+
 type Aes128Ctr = Ctr128BE<Aes128>;
 type Aes192Ctr = Ctr128BE<Aes192>;
 type Aes256Ctr = Ctr128BE<Aes256>;
@@ -35,7 +39,11 @@ type Aes256Ctr = Ctr128BE<Aes256>;
 type Aes128Gcm = AesGcm<aes_gcm::Aes128Gcm>;
 type Aes192Gcm = AesGcm<aes_gcm::AesGcm<aes::Aes192, U12>>;
 type Aes256Gcm = AesGcm<aes_gcm::Aes256Gcm>;
-type ChaCha20IetfPoly1305 = ChaCha20Poly1305;
+
+// ChaCha20 is a type alias for ChaCha20Legacy
+type ChaCha20 = chacha20::ChaCha20Legacy;
+// ChaCha20Ietf is a type alias for ChaCha20
+type ChaCha20Ietf = chacha20::ChaCha20;
 
 macro_rules! impl_cfb {
     ($name:ident, $cipher:ty) => {
@@ -67,6 +75,10 @@ impl_cfb!(Aes128Cfb, Aes128);
 impl_cfb!(Aes192Cfb, Aes192);
 impl_cfb!(Aes256Cfb, Aes256);
 
+impl_cfb!(Camellia128Cfb, Camellia128);
+impl_cfb!(Camellia192Cfb, Camellia192);
+impl_cfb!(Camellia256Cfb, Camellia256);
+
 macro_rules! impl_ctr {
     ($name:ident) => {
         impl CipherCore for $name {
@@ -90,6 +102,20 @@ impl_ctr!(Aes192Ctr);
 impl_ctr!(Aes256Ctr);
 
 impl CipherCore for ChaCha20 {
+    /// Encrypt data in place.
+    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        self.apply_keystream(data);
+        Ok(())
+    }
+
+    /// Decrypt data in place.
+    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        self.apply_keystream(data);
+        Ok(())
+    }
+}
+
+impl CipherCore for ChaCha20Ietf {
     /// Encrypt data in place.
     fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
         self.apply_keystream(data);
@@ -225,25 +251,25 @@ where
     }
 }
 
-struct ChaCha20Poly1305 {
+struct ChaCha20IetfPoly1305 {
     inner: chacha20poly1305::ChaCha20Poly1305,
     nonce: Vec<u8>,
 }
 
-impl ChaCha20Poly1305 {
-    fn new(key: &[u8], salt: &[u8]) -> ChaCha20Poly1305 {
+impl ChaCha20IetfPoly1305 {
+    fn new(key: &[u8], salt: &[u8]) -> ChaCha20IetfPoly1305 {
         // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
         hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
         let key = chacha20poly1305::Key::from_slice(&subkey);
-        ChaCha20Poly1305 {
+        ChaCha20IetfPoly1305 {
             inner: chacha20poly1305::ChaCha20Poly1305::new(key),
             nonce: vec![0u8; 12],
         }
     }
 }
 
-impl CipherCore for ChaCha20Poly1305 {
+impl CipherCore for ChaCha20IetfPoly1305 {
     /// Encrypt data in place.
     /// Note: For ChaCha20-Poly1305, the buffer must have at least 16 bytes of extra space
     /// after the plaintext to store the authentication tag.
@@ -314,6 +340,95 @@ impl CipherCore for ChaCha20Poly1305 {
     }
 }
 
+struct XChaCha20IetfPoly1305 {
+    inner: chacha20poly1305::XChaCha20Poly1305,
+    nonce: Vec<u8>,
+}
+
+impl XChaCha20IetfPoly1305 {
+    fn new(key: &[u8], salt: &[u8]) -> XChaCha20IetfPoly1305 {
+        // Use HKDF-SHA1 to derive subkey from key and salt
+        let mut subkey = vec![0u8; key.len()];
+        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
+        let key = chacha20poly1305::Key::from_slice(&subkey);
+        XChaCha20IetfPoly1305 {
+            inner: chacha20poly1305::XChaCha20Poly1305::new(key),
+            nonce: vec![0u8; 24],
+        }
+    }
+}
+
+impl CipherCore for XChaCha20IetfPoly1305 {
+    /// Encrypt data in place.
+    /// Note: For XChaCha20-Poly1305, the buffer must have at least 16 bytes of extra space
+    /// after the plaintext to store the authentication tag.
+    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        if data.len() < 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer too small for Poly1305 tag",
+            ));
+        }
+        let plaintext_len = data.len() - 16;
+        let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
+
+        // Convert to Vec for encrypt_in_place (which requires Buffer trait)
+        let mut buffer = plaintext_slice.to_vec();
+
+        let nonce = chacha20poly1305::XNonce::from_slice(&self.nonce);
+        match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
+            Ok(()) => {
+                if buffer.len() == plaintext_len + 16 {
+                    plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
+                    tag_space.copy_from_slice(&buffer[plaintext_len..]);
+                    increment_nonce(&mut self.nonce);
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "XChaCha20-Poly1305 encryption output length mismatch",
+                    ))
+                }
+            }
+            Err(e) => Err(io::Error::other(format!(
+                "XChaCha20-Poly1305 encryption failed: {e}"
+            ))),
+        }
+    }
+
+    /// Decrypt data in place.
+    /// Note: For XChaCha20-Poly1305, the last 16 bytes are assumed to be the authentication tag.
+    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        if data.len() < 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer too small for Poly1305 tag",
+            ));
+        }
+        let mut buffer = data.to_vec();
+
+        let nonce = chacha20poly1305::XNonce::from_slice(&self.nonce);
+        match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
+            Ok(()) => {
+                let plaintext_len = buffer.len();
+                if plaintext_len <= data.len() {
+                    data[..plaintext_len].copy_from_slice(&buffer);
+                    increment_nonce(&mut self.nonce);
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "XChaCha20-Poly1305 decryption output length mismatch",
+                    ))
+                }
+            }
+            Err(e) => Err(io::Error::other(format!(
+                "XChaCha20-Poly1305 decryption failed (authentication failed): {e}"
+            ))),
+        }
+    }
+}
+
 pub struct Cipher {
     key: Vec<u8>,
     key_len: usize,
@@ -332,6 +447,12 @@ pub enum Method {
     Aes192Cfb,
     #[serde(rename = "aes-256-cfb")]
     Aes256Cfb,
+    #[serde(rename = "camellia-128-cfb")]
+    Camellia128Cfb,
+    #[serde(rename = "camellia-192-cfb")]
+    Camellia192Cfb,
+    #[serde(rename = "camellia-256-cfb")]
+    Camellia256Cfb,
     #[serde(rename = "aes-128-ctr")]
     Aes128Ctr,
     #[serde(rename = "aes-192-ctr")]
@@ -340,6 +461,8 @@ pub enum Method {
     Aes256Ctr,
     #[serde(rename = "chacha20")]
     ChaCha20,
+    #[serde(rename = "chacha20-ietf")]
+    ChaCha20Ietf,
     #[serde(rename = "aes-128-gcm")]
     Aes128Gcm,
     #[serde(rename = "aes-192-gcm")]
@@ -348,6 +471,8 @@ pub enum Method {
     Aes256Gcm,
     #[serde(rename = "chacha20-ietf-poly1305")]
     ChaCha20IetfPoly1305,
+    #[serde(rename = "xchacha20-ietf-poly1305")]
+    XChaCha20IetfPoly1305,
 }
 
 impl Cipher {
@@ -356,14 +481,19 @@ impl Cipher {
             Method::Aes128Cfb => (16, 16),
             Method::Aes192Cfb => (24, 16),
             Method::Aes256Cfb => (32, 16),
+            Method::Camellia128Cfb => (16, 16),
+            Method::Camellia192Cfb => (24, 16),
+            Method::Camellia256Cfb => (32, 16),
             Method::Aes128Ctr => (16, 16),
             Method::Aes192Ctr => (24, 16),
             Method::Aes256Ctr => (32, 16),
-            Method::ChaCha20 => (32, 12),
+            Method::ChaCha20 => (32, 8),
+            Method::ChaCha20Ietf => (32, 12),
             Method::Aes128Gcm => (16, 16),
             Method::Aes192Gcm => (24, 24),
             Method::Aes256Gcm => (32, 32),
             Method::ChaCha20IetfPoly1305 => (32, 32),
+            Method::XChaCha20IetfPoly1305 => (32, 32),
         };
 
         Cipher {
@@ -412,16 +542,22 @@ impl Cipher {
             Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, iv_or_salt)),
             Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, iv_or_salt)),
             Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, iv_or_salt)),
+            Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, iv_or_salt)),
+            Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, iv_or_salt)),
+            Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, iv_or_salt)),
             Method::Aes128Ctr => Box::new(Aes128Ctr::new(key.into(), iv_or_salt.into())),
             Method::Aes192Ctr => Box::new(Aes192Ctr::new(key.into(), iv_or_salt.into())),
             Method::Aes256Ctr => Box::new(Aes256Ctr::new(key.into(), iv_or_salt.into())),
             Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv_or_salt.into())),
+            Method::ChaCha20Ietf => Box::new(ChaCha20Ietf::new(key.into(), iv_or_salt.into())),
             // For GCM methods, iv_or_salt is actually salt
             Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, iv_or_salt)),
             Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, iv_or_salt)),
             Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, iv_or_salt)),
             // For ChaCha20-Poly1305, iv_or_salt is actually salt
             Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, iv_or_salt)),
+            // For XChaCha20-Poly1305, iv_or_salt is actually salt
+            Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, iv_or_salt)),
         }
     }
 
@@ -444,6 +580,7 @@ impl Cipher {
                 | Method::Aes192Gcm
                 | Method::Aes256Gcm
                 | Method::ChaCha20IetfPoly1305
+                | Method::XChaCha20IetfPoly1305
         )
     }
 
