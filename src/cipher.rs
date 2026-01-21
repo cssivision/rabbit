@@ -366,9 +366,8 @@ impl Cipher {
             Method::ChaCha20IetfPoly1305 => (32, 32),
         };
 
-        let key = generate_key(password.as_bytes(), key_len);
         Cipher {
-            key: Vec::from(&key[..]),
+            key: generate_key(password.as_bytes(), key_len),
             key_len,
             iv_or_salt_len,
             iv_or_salt: vec![0u8; iv_or_salt_len],
