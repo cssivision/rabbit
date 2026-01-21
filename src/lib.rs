@@ -219,9 +219,8 @@ where
         if !reader.inited {
             let mut cipher = me.cipher.lock().unwrap();
             while reader.pos < cipher.iv_or_salt_len() {
-                let n = ready!(
-                    Pin::new(&mut me.stream).poll_read(cx, &mut cipher.iv_mut()[reader.pos..])
-                )?;
+                let n = ready!(Pin::new(&mut me.stream)
+                    .poll_read(cx, &mut cipher.iv_or_salt_mut()[reader.pos..]))?;
                 if n == 0 {
                     return Poll::Ready(Ok(0));
                 }

@@ -403,16 +403,8 @@ impl Cipher {
     /// Get mutable reference to the IV (or salt for GCM/ChaCha20-Poly1305 methods).
     /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM) and ChaCha20-Poly1305, this is the salt.
     /// For other methods, this is the IV.
-    pub fn iv_mut(&mut self) -> &mut [u8] {
+    pub fn iv_or_salt_mut(&mut self) -> &mut [u8] {
         &mut self.iv_or_salt[..]
-    }
-
-    pub fn is_encrypt_inited(&self) -> bool {
-        self.enc.is_some()
-    }
-
-    pub fn is_decrypt_inited(&self) -> bool {
-        self.dec.is_some()
     }
 
     fn new_cipher(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
@@ -436,6 +428,14 @@ impl Cipher {
 
     pub fn init_decrypt(&mut self) {
         self.dec = Some(self.new_cipher(&self.iv_or_salt));
+    }
+
+    pub fn tag_size(&self) -> usize {
+        if self.is_aead() {
+            16
+        } else {
+            0
+        }
     }
 
     pub fn is_aead(&self) -> bool {

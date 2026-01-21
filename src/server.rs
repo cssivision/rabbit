@@ -175,20 +175,34 @@ impl Future for UdpRelay {
 }
 
 async fn proxy_packet(
-    cipher: Cipher,
+    mut cipher: Cipher,
     mut buf: Vec<u8>,
     peer_addr: SocketAddr,
     mut sender: Sender<(Vec<u8>, SocketAddr)>,
 ) -> io::Result<(u64, u64)> {
-    let iv_len = cipher.iv_or_salt_len();
-    let cipher = Arc::new(Mutex::new(cipher));
+    if buf.len() < cipher.iv_or_salt_len() {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "UnexpectedEof",
+        ));
+    }
+    let iv_or_salt_len = cipher.iv_or_salt_len();
+    cipher
+        .iv_or_salt_mut()
+        .copy_from_slice(&buf[..iv_or_salt_len]);
+    cipher.init_decrypt();
+    buf.drain(..iv_or_salt_len);
 
-    let buf_slice = &mut buf.as_slice();
-    let mut socket = CipherStream::new(cipher.clone(), buf_slice);
+    // decrypt recv data.
+    cipher.decrypt_in_place(&mut buf)?;
+    if cipher.is_aead() {
+        buf.drain(buf.len() - cipher.tag_size()..);
+    }
+
     // get host and port.
-    let (n, host, port) = get_addr_info(&mut socket).await?;
-    buf.drain(..n + iv_len);
+    let (n, host, port) = get_addr_info(&mut buf.as_slice()).await?;
     log::debug!("proxy to address: {}:{}", host, port);
+    buf.drain(..n);
 
     // resolver host if need.
     let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
@@ -199,9 +213,6 @@ async fn proxy_packet(
         ([0u16; 8], 0).into()
     };
 
-    // decrypt recv data, dec already init in get_addr_info() function.
-    cipher.lock().unwrap().decrypt_in_place(&mut buf)?;
-
     // send to and recv from target.
     let socket = UdpSocket::bind(local)?;
     socket.connect((addr, port))?;
@@ -211,12 +222,14 @@ async fn proxy_packet(
     recv_buf.truncate(n);
 
     // encrypt return data.
-    if !cipher.lock().unwrap().is_encrypt_inited() {
-        cipher.lock().unwrap().init_encrypt();
+    cipher.init_encrypt();
+    if cipher.is_aead() {
+        recv_buf.extend_from_slice(&vec![0u8; cipher.tag_size()]);
     }
-    cipher.lock().unwrap().encrypt_in_place(&mut recv_buf)?;
+    cipher.encrypt_in_place(&mut recv_buf)?;
+
     sender
-        .try_send((recv_buf.to_vec(), peer_addr))
+        .try_send((recv_buf, peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
