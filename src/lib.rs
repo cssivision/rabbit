@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
+use bytes::BytesMut;
 use futures_util::{AsyncRead, AsyncWrite};
 
 use cipher::Cipher;
@@ -47,7 +48,7 @@ pub(crate) struct CipherStream<'a, A: ?Sized> {
 /// decrypt it, and provide plaintext to the caller.
 struct Reader {
     /// Buffer for storing encrypted data read from the stream
-    buf: Vec<u8>,
+    buf: BytesMut,
     /// Whether the reader has been initialized (IV/salt read and decryptor initialized)
     inited: bool,
     /// Current read position within the buffer
@@ -64,7 +65,7 @@ struct Reader {
 /// the encrypted data (along with IV/salt) to the stream.
 struct Writer {
     /// Buffer for storing encrypted data to be written to the stream
-    buf: Vec<u8>,
+    buf: BytesMut,
     /// Whether the writer has been initialized (encryptor initialized and IV/salt written)
     inited: bool,
     /// Current write position within the buffer
@@ -86,13 +87,13 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
             stream,
             cipher,
             reader: Reader {
-                buf: vec![0u8; 4096],
+                buf: BytesMut::with_capacity(4096),
                 inited: false,
                 pos: 0,
                 cap: 0,
                 aead: if is_aead {
                     Some(AeadReader {
-                        buf: vec![0u8; 4096],
+                        buf: BytesMut::with_capacity(4096),
                         pos: 0,
                         payload_size: 0,
                         tag_size,
@@ -103,7 +104,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 },
             },
             writer: Writer {
-                buf: vec![0u8; 4096],
+                buf: BytesMut::with_capacity(4096),
                 inited: false,
                 pos: 0,
                 cap: 0,
@@ -119,7 +120,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
 }
 
 struct AeadReader {
-    buf: Vec<u8>,
+    buf: BytesMut,
     pos: usize,
     tag_size: usize, // 16 bytes
     payload_size: usize,
@@ -133,8 +134,9 @@ struct AeadWriter {
 impl AeadWriter {
     /// Encrypt payload in AEAD format.
     /// Format: [encrypted payload length (2 bytes)][length tag (16 bytes)][encrypted payload][payload tag (16 bytes)]
-    fn encrypt_payload(&self, payload: &[u8], cipher: &mut Cipher) -> io::Result<Vec<u8>> {
-        let mut result = vec![0u8; 2 + self.tag_size + payload.len() + self.tag_size];
+    fn encrypt_payload(&self, payload: &[u8], cipher: &mut Cipher) -> io::Result<BytesMut> {
+        let mut result = BytesMut::with_capacity(2 + self.tag_size + payload.len() + self.tag_size);
+        result.resize(2 + self.tag_size + payload.len() + self.tag_size, 0u8);
 
         // Set payload length (first 2 bytes)
         result[..2].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
@@ -163,7 +165,7 @@ impl AeadReader {
         cx: &mut Context<'_>,
         mut stream: &mut A,
         cipher: Arc<Mutex<Cipher>>,
-    ) -> Poll<io::Result<Vec<u8>>>
+    ) -> Poll<io::Result<BytesMut>>
     where
         A: AsyncRead + Unpin + ?Sized,
     {
@@ -175,7 +177,7 @@ impl AeadReader {
                         let n =
                             ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
                         if n == 0 {
-                            return Poll::Ready(Ok(vec![]));
+                            return Poll::Ready(Ok(BytesMut::new()));
                         }
                         self.pos += n;
                     }
@@ -192,7 +194,7 @@ impl AeadReader {
                         let n =
                             ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
                         if n == 0 {
-                            return Poll::Ready(Ok(vec![]));
+                            return Poll::Ready(Ok(BytesMut::new()));
                         }
                         self.pos += n;
                     }
@@ -200,7 +202,9 @@ impl AeadReader {
                     cipher.decrypt_in_place(&mut self.buf[..self.payload_size + self.tag_size])?;
                     self.pos = 0;
                     self.state = AeadReaderState::PayloadSize;
-                    return Poll::Ready(Ok(self.buf[..self.payload_size].to_vec()));
+                    let result = self.buf.split_to(self.payload_size);
+                    self.buf.clear();
+                    return Poll::Ready(Ok(result));
                 }
             }
         }
@@ -251,10 +255,10 @@ where
                 }
                 reader.pos = 0;
                 reader.cap = data.len();
-                reader.buf.resize(data.len(), 0u8);
-                reader.buf[..data.len()].copy_from_slice(&data);
+                reader.buf = data;
                 continue;
             }
+            reader.buf.resize(4096, 0u8);
             let n = ready!(Pin::new(&mut me.stream).poll_read(cx, &mut reader.buf[..]))?;
             if n == 0 {
                 return Poll::Ready(Ok(0));
@@ -316,14 +320,13 @@ where
                 aead.encrypt_payload(buf, &mut cipher)?
             } else {
                 // Non-AEAD: copy data first, then encrypt in place
-                let mut data = buf.to_vec();
+                let mut data = BytesMut::from(buf);
                 cipher.encrypt_in_place(&mut data)?;
                 data
             };
             writer.pos = 0;
             writer.cap = data.len();
-            writer.buf.resize(data.len(), 0u8);
-            writer.buf[..data.len()].copy_from_slice(&data);
+            writer.buf = data;
             writer.read_done = true;
         }
     }

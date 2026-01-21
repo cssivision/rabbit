@@ -652,6 +652,7 @@ dependencies = [
  "aes",
  "aes-gcm",
  "awak",
+ "bytes",
  "cfb-mode",
  "chacha20",
  "chacha20poly1305",
