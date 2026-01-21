@@ -129,6 +129,12 @@ impl CipherCore for ChaCha20Ietf {
     }
 }
 
+fn derive_blake3_subkey(key: &[u8], salt: &[u8]) -> Vec<u8> {
+    let mut data = key.to_vec();
+    data.extend_from_slice(salt);
+    blake3::derive_key("shadowsocks 2022 session subkey", &data).to_vec()
+}
+
 struct AesGcm<G>
 where
     G: AeadInPlace + KeyInit,
@@ -144,6 +150,73 @@ fn increment_nonce(nonce: &mut [u8]) {
             return;
         }
     }
+}
+
+/// Shared AEAD encrypt/decrypt implementation to avoid repetition across AEAD ciphers.
+macro_rules! impl_aead_methods {
+    ($make_nonce:expr) => {
+        /// Encrypt data in place. Buffer must reserve 16 bytes for the authentication tag.
+        fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+            if data.len() < 16 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "buffer too small for AEAD tag",
+                ));
+            }
+            let plaintext_len = data.len() - 16;
+            let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
+            let mut buffer = plaintext_slice.to_vec();
+
+            let nonce = $make_nonce(&self.nonce);
+            match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
+                Ok(()) => {
+                    if buffer.len() == plaintext_len + 16 {
+                        plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
+                        tag_space.copy_from_slice(&buffer[plaintext_len..]);
+                        increment_nonce(&mut self.nonce);
+                        Ok(())
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "AEAD encryption output length mismatch",
+                        ))
+                    }
+                }
+                Err(e) => Err(io::Error::other(format!("AEAD encryption failed: {e}"))),
+            }
+        }
+
+        /// Decrypt data in place. Assumes the last 16 bytes are the authentication tag.
+        fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+            if data.len() < 16 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "buffer too small for AEAD tag",
+                ));
+            }
+            let mut buffer = data.to_vec();
+
+            let nonce = $make_nonce(&self.nonce);
+            match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
+                Ok(()) => {
+                    let plaintext_len = buffer.len();
+                    if plaintext_len <= data.len() {
+                        data[..plaintext_len].copy_from_slice(&buffer);
+                        increment_nonce(&mut self.nonce);
+                        Ok(())
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "AEAD decryption output length mismatch",
+                        ))
+                    }
+                }
+                Err(e) => Err(io::Error::other(format!(
+                    "AEAD decryption failed (authentication failed): {e}"
+                ))),
+            }
+        }
+    };
 }
 
 impl<G> AesGcm<G>
@@ -166,89 +239,47 @@ impl<G> CipherCore for AesGcm<G>
 where
     G: AeadInPlace + KeyInit + Send + Sync + 'static,
 {
-    /// Encrypt data in place.
-    /// Note: For GCM, the buffer must have at least 16 bytes of extra space
-    /// after the plaintext to store the authentication tag.
-    /// The input buffer should contain plaintext in the first (len - 16) bytes,
-    /// and the last 16 bytes are reserved for the authentication tag.
-    /// After encryption, the buffer will contain ciphertext in the first (len - 16) bytes
-    /// and the authentication tag in the last 16 bytes.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        // GCM tag is 16 bytes, so we need to separate plaintext and tag space
-        if data.len() < 16 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer too small for GCM tag",
-            ));
-        }
-        let plaintext_len = data.len() - 16;
-        let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
+    impl_aead_methods!(|n| Nonce::from_slice(n));
+}
 
-        // Convert to Vec for encrypt_in_place (which requires Buffer trait)
-        let mut buffer = plaintext_slice.to_vec();
+struct Blake3Aes128Gcm {
+    inner: aes_gcm::Aes128Gcm,
+    nonce: Vec<u8>,
+}
 
-        let nonce = Nonce::from_slice(&self.nonce);
-        // Use encrypt_in_place: it will encrypt buffer and append tag
-        // After encryption: buffer contains [ciphertext][tag]
-        match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
-            Ok(()) => {
-                // encrypt_in_place appends the tag to the buffer
-                // buffer now contains [ciphertext][tag], total length = plaintext_len + 16
-                if buffer.len() == plaintext_len + 16 {
-                    // Copy ciphertext back to plaintext_slice
-                    plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
-                    // Copy tag to tag_space
-                    tag_space.copy_from_slice(&buffer[plaintext_len..]);
-                    increment_nonce(&mut self.nonce);
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "GCM encryption output length mismatch",
-                    ))
-                }
-            }
-            Err(e) => Err(io::Error::other(format!("GCM encryption failed: {e}"))),
+impl Blake3Aes128Gcm {
+    fn new(key: &[u8], salt: &[u8]) -> Blake3Aes128Gcm {
+        let subkey = derive_blake3_subkey(key, salt);
+        let key = Key::<aes_gcm::Aes128Gcm>::from_slice(&subkey);
+        Blake3Aes128Gcm {
+            inner: aes_gcm::Aes128Gcm::new(key),
+            nonce: vec![0u8; 12],
         }
     }
+}
 
-    /// Decrypt data in place.
-    /// Note: For GCM, the last 16 bytes are assumed to be the authentication tag.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        if data.len() < 16 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer too small for GCM tag",
-            ));
-        }
-        // Convert to Vec for decrypt_in_place (which requires Buffer trait)
-        let mut buffer = data.to_vec();
+impl CipherCore for Blake3Aes128Gcm {
+    impl_aead_methods!(|n| Nonce::from_slice(n));
+}
 
-        let nonce = Nonce::from_slice(&self.nonce);
-        // Use decrypt_in_place: it will decrypt buffer and verify the tag
-        // The buffer layout: [ciphertext][tag]
-        // After decryption: buffer contains [plaintext] (tag is consumed/verified)
-        match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
-            Ok(()) => {
-                // decrypt_in_place verifies the tag and decrypts in place
-                // The plaintext is now in buffer, copy it back to data
-                let plaintext_len = buffer.len();
-                if plaintext_len <= data.len() {
-                    data[..plaintext_len].copy_from_slice(&buffer);
-                    increment_nonce(&mut self.nonce);
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "GCM decryption output length mismatch",
-                    ))
-                }
-            }
-            Err(e) => Err(io::Error::other(format!(
-                "GCM decryption failed (authentication failed): {e}"
-            ))),
+struct Blake3Aes256Gcm {
+    inner: aes_gcm::Aes256Gcm,
+    nonce: Vec<u8>,
+}
+
+impl Blake3Aes256Gcm {
+    fn new(key: &[u8], salt: &[u8]) -> Blake3Aes256Gcm {
+        let subkey = derive_blake3_subkey(key, salt);
+        let key = Key::<aes_gcm::Aes256Gcm>::from_slice(&subkey);
+        Blake3Aes256Gcm {
+            inner: aes_gcm::Aes256Gcm::new(key),
+            nonce: vec![0u8; 12],
         }
     }
+}
+
+impl CipherCore for Blake3Aes256Gcm {
+    impl_aead_methods!(|n| Nonce::from_slice(n));
 }
 
 struct ChaCha20IetfPoly1305 {
@@ -270,74 +301,7 @@ impl ChaCha20IetfPoly1305 {
 }
 
 impl CipherCore for ChaCha20IetfPoly1305 {
-    /// Encrypt data in place.
-    /// Note: For ChaCha20-Poly1305, the buffer must have at least 16 bytes of extra space
-    /// after the plaintext to store the authentication tag.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        if data.len() < 16 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer too small for Poly1305 tag",
-            ));
-        }
-        let plaintext_len = data.len() - 16;
-        let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
-
-        // Convert to Vec for encrypt_in_place (which requires Buffer trait)
-        let mut buffer = plaintext_slice.to_vec();
-
-        let nonce = chacha20poly1305::Nonce::from_slice(&self.nonce);
-        match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
-            Ok(()) => {
-                if buffer.len() == plaintext_len + 16 {
-                    plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
-                    tag_space.copy_from_slice(&buffer[plaintext_len..]);
-                    increment_nonce(&mut self.nonce);
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "ChaCha20-Poly1305 encryption output length mismatch",
-                    ))
-                }
-            }
-            Err(e) => Err(io::Error::other(format!(
-                "ChaCha20-Poly1305 encryption failed: {e}"
-            ))),
-        }
-    }
-
-    /// Decrypt data in place.
-    /// Note: For ChaCha20-Poly1305, the last 16 bytes are assumed to be the authentication tag.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        if data.len() < 16 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer too small for Poly1305 tag",
-            ));
-        }
-        let mut buffer = data.to_vec();
-
-        let nonce = chacha20poly1305::Nonce::from_slice(&self.nonce);
-        match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
-            Ok(()) => {
-                let plaintext_len = buffer.len();
-                if plaintext_len <= data.len() {
-                    data[..plaintext_len].copy_from_slice(&buffer);
-                    increment_nonce(&mut self.nonce);
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "ChaCha20-Poly1305 decryption output length mismatch",
-                    ))
-                }
-            }
-            Err(e) => Err(io::Error::other(format!(
-                "ChaCha20-Poly1305 decryption failed (authentication failed): {e}"
-            ))),
-        }
-    }
+    impl_aead_methods!(|n| chacha20poly1305::Nonce::from_slice(n));
 }
 
 struct XChaCha20IetfPoly1305 {
@@ -359,74 +323,7 @@ impl XChaCha20IetfPoly1305 {
 }
 
 impl CipherCore for XChaCha20IetfPoly1305 {
-    /// Encrypt data in place.
-    /// Note: For XChaCha20-Poly1305, the buffer must have at least 16 bytes of extra space
-    /// after the plaintext to store the authentication tag.
-    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        if data.len() < 16 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer too small for Poly1305 tag",
-            ));
-        }
-        let plaintext_len = data.len() - 16;
-        let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
-
-        // Convert to Vec for encrypt_in_place (which requires Buffer trait)
-        let mut buffer = plaintext_slice.to_vec();
-
-        let nonce = chacha20poly1305::XNonce::from_slice(&self.nonce);
-        match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
-            Ok(()) => {
-                if buffer.len() == plaintext_len + 16 {
-                    plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
-                    tag_space.copy_from_slice(&buffer[plaintext_len..]);
-                    increment_nonce(&mut self.nonce);
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "XChaCha20-Poly1305 encryption output length mismatch",
-                    ))
-                }
-            }
-            Err(e) => Err(io::Error::other(format!(
-                "XChaCha20-Poly1305 encryption failed: {e}"
-            ))),
-        }
-    }
-
-    /// Decrypt data in place.
-    /// Note: For XChaCha20-Poly1305, the last 16 bytes are assumed to be the authentication tag.
-    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
-        if data.len() < 16 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer too small for Poly1305 tag",
-            ));
-        }
-        let mut buffer = data.to_vec();
-
-        let nonce = chacha20poly1305::XNonce::from_slice(&self.nonce);
-        match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
-            Ok(()) => {
-                let plaintext_len = buffer.len();
-                if plaintext_len <= data.len() {
-                    data[..plaintext_len].copy_from_slice(&buffer);
-                    increment_nonce(&mut self.nonce);
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "XChaCha20-Poly1305 decryption output length mismatch",
-                    ))
-                }
-            }
-            Err(e) => Err(io::Error::other(format!(
-                "XChaCha20-Poly1305 decryption failed (authentication failed): {e}"
-            ))),
-        }
-    }
+    impl_aead_methods!(|n| chacha20poly1305::XNonce::from_slice(n));
 }
 
 pub struct Cipher {
@@ -463,6 +360,10 @@ pub enum Method {
     ChaCha20,
     #[serde(rename = "chacha20-ietf")]
     ChaCha20Ietf,
+    #[serde(rename = "2022-blake3-aes-128-gcm")]
+    Blake3Aes128Gcm,
+    #[serde(rename = "2022-blake3-aes-256-gcm")]
+    Blake3Aes256Gcm,
     #[serde(rename = "aes-128-gcm")]
     Aes128Gcm,
     #[serde(rename = "aes-192-gcm")]
@@ -489,6 +390,8 @@ impl Cipher {
             Method::Aes256Ctr => (32, 16),
             Method::ChaCha20 => (32, 8),
             Method::ChaCha20Ietf => (32, 12),
+            Method::Blake3Aes128Gcm => (16, 16),
+            Method::Blake3Aes256Gcm => (32, 32),
             Method::Aes128Gcm => (16, 16),
             Method::Aes192Gcm => (24, 24),
             Method::Aes256Gcm => (32, 32),
@@ -550,6 +453,8 @@ impl Cipher {
             Method::Aes256Ctr => Box::new(Aes256Ctr::new(key.into(), iv_or_salt.into())),
             Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv_or_salt.into())),
             Method::ChaCha20Ietf => Box::new(ChaCha20Ietf::new(key.into(), iv_or_salt.into())),
+            Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, iv_or_salt)),
+            Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, iv_or_salt)),
             // For GCM methods, iv_or_salt is actually salt
             Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, iv_or_salt)),
             Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, iv_or_salt)),
@@ -581,6 +486,7 @@ impl Cipher {
                 | Method::Aes256Gcm
                 | Method::ChaCha20IetfPoly1305
                 | Method::XChaCha20IetfPoly1305
+                | Method::Blake3Aes128Gcm
         )
     }
 
