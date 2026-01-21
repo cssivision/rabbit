@@ -3,21 +3,21 @@ use std::io;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use awak::net::{TcpListener, TcpStream, UdpSocket};
 use awak::time::timeout;
-use awak::util::IdleTimeout;
+use awak::util::{copy_bidirectional, IdleTimeout};
 use futures_channel::mpsc::{channel, Receiver, Sender};
-use futures_util::{future::join, AsyncRead, AsyncWrite, Stream};
+use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
 use socket2::SockAddr;
 
 use crate::cipher::Cipher;
 use crate::config::{self, Mode};
-use crate::io::{copy_bidirectional, write_all, DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 use crate::util::generate_raw_addr;
+use crate::CipherStream;
+use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_UDP_BUFFER_SIZE: usize = 65536;
@@ -229,11 +229,11 @@ async fn proxy_packet(
         unimplemented!()
     };
     cipher.init_encrypt();
-    let mut data = cipher.iv().to_vec();
+    let mut data = cipher.iv_or_salt().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
     data.extend_from_slice(&buf);
-    cipher.encrypt(&mut data[cipher.iv_len()..]);
+    cipher.encrypt_in_place(&mut data[cipher.iv_or_salt_len()..])?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
@@ -245,7 +245,7 @@ async fn proxy_packet(
     recv_buf.truncate(n);
 
     cipher.init_decrypt();
-    cipher.decrypt(&mut recv_buf);
+    cipher.decrypt_in_place(&mut recv_buf)?;
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
@@ -261,19 +261,18 @@ async fn proxy<A>(
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let cipher = Arc::new(Mutex::new(cipher));
-
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
+    let mut socket2 = CipherStream::new(cipher, &mut socket2);
 
     let rawaddr = generate_raw_addr(
         &original_dst_addr.ip().to_string(),
         original_dst_addr.port(),
     );
-    write_all(cipher.clone(), &mut socket2, &rawaddr).await?;
+    socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional(socket1, &mut socket2, cipher),
+        copy_bidirectional(socket1, &mut socket2),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )
