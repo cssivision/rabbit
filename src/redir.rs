@@ -229,7 +229,7 @@ async fn proxy_packet(
         unimplemented!()
     };
     cipher.init_encrypt();
-    let mut data = cipher.iv_or_salt().to_vec();
+    let mut data = cipher.encrypt_iv_or_salt().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
     data.extend_from_slice(&buf);

@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::{generate_key, hkdf_sha1};
 
+const AEAD2022_IDENTITY_SUBKEY_CONTEXT: &str = "shadowsocks 2022 identity subkey";
+const AEAD_SUBKEY_INFO: &[u8] = b"ss-subkey";
+
 trait CipherCore {
     /// Encrypt data in place.
     fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()>;
@@ -130,9 +133,9 @@ impl CipherCore for ChaCha20Ietf {
 }
 
 fn derive_blake3_subkey(key: &[u8], salt: &[u8]) -> Vec<u8> {
-    let mut data = key.to_vec();
-    data.extend_from_slice(salt);
-    blake3::derive_key("shadowsocks 2022 session subkey", &data).to_vec()
+    let mut key_material = key.to_vec();
+    key_material.extend_from_slice(salt);
+    blake3::derive_key(AEAD2022_IDENTITY_SUBKEY_CONTEXT, &key_material).to_vec()
 }
 
 struct AesGcm<G>
@@ -226,7 +229,8 @@ where
     fn new(key: &[u8], salt: &[u8]) -> AesGcm<G> {
         // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
-        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
+        hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
+            .expect("HKDF-SHA1 key derivation failed");
         let key = Key::<G>::from_slice(&subkey);
         AesGcm {
             inner: G::new(key),
@@ -250,7 +254,7 @@ struct Blake3Aes128Gcm {
 impl Blake3Aes128Gcm {
     fn new(key: &[u8], salt: &[u8]) -> Blake3Aes128Gcm {
         let subkey = derive_blake3_subkey(key, salt);
-        let key = Key::<aes_gcm::Aes128Gcm>::from_slice(&subkey);
+        let key = Key::<aes_gcm::Aes128Gcm>::from_slice(&subkey[..16]);
         Blake3Aes128Gcm {
             inner: aes_gcm::Aes128Gcm::new(key),
             nonce: vec![0u8; 12],
@@ -270,7 +274,7 @@ struct Blake3Aes256Gcm {
 impl Blake3Aes256Gcm {
     fn new(key: &[u8], salt: &[u8]) -> Blake3Aes256Gcm {
         let subkey = derive_blake3_subkey(key, salt);
-        let key = Key::<aes_gcm::Aes256Gcm>::from_slice(&subkey);
+        let key = Key::<aes_gcm::Aes256Gcm>::from_slice(&subkey[..32]);
         Blake3Aes256Gcm {
             inner: aes_gcm::Aes256Gcm::new(key),
             nonce: vec![0u8; 12],
@@ -291,7 +295,8 @@ impl ChaCha20IetfPoly1305 {
     fn new(key: &[u8], salt: &[u8]) -> ChaCha20IetfPoly1305 {
         // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
-        hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
+        hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
+            .expect("HKDF-SHA1 key derivation failed");
         let key = chacha20poly1305::Key::from_slice(&subkey);
         ChaCha20IetfPoly1305 {
             inner: chacha20poly1305::ChaCha20Poly1305::new(key),
@@ -329,10 +334,11 @@ impl CipherCore for XChaCha20IetfPoly1305 {
 pub struct Cipher {
     key: Vec<u8>,
     key_len: usize,
-    iv_or_salt: Vec<u8>,
     iv_or_salt_len: usize,
-    enc: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
-    dec: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
+    encrypt_iv_or_salt: Vec<u8>,
+    decrypt_iv_or_salt: Vec<u8>,
+    encrypt: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
+    decrypt: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
     method: Method,
 }
 
@@ -403,26 +409,34 @@ impl Cipher {
             key: generate_key(password.as_bytes(), key_len),
             key_len,
             iv_or_salt_len,
-            iv_or_salt: vec![0u8; iv_or_salt_len],
-            enc: None,
-            dec: None,
+            encrypt_iv_or_salt: vec![0u8; iv_or_salt_len],
+            decrypt_iv_or_salt: vec![0u8; iv_or_salt_len],
+            encrypt: None,
+            decrypt: None,
             method,
         }
     }
 
     pub fn init_encrypt(&mut self) {
-        if self.iv_or_salt.is_empty() {
-            self.iv_or_salt = vec![0u8; self.iv_or_salt_len];
-            rand::rng().fill(&mut self.iv_or_salt[..]);
-        }
-        self.enc = Some(self.new_cipher(&self.iv_or_salt));
+        let iv_or_salt = if !self.is_aead2022() {
+            self.decrypt_iv_or_salt.clone()
+        } else {
+            let mut iv_or_salt = vec![0u8; self.iv_or_salt_len];
+            rand::rng().fill(&mut iv_or_salt[..]);
+            iv_or_salt
+        };
+        self.encrypt = Some(self.new_cipher(&iv_or_salt));
+    }
+
+    pub fn init_decrypt(&mut self) {
+        self.decrypt = Some(self.new_cipher(&self.decrypt_iv_or_salt));
     }
 
     /// Get the IV (or salt for GCM methods).
     /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM), this returns the salt.
     /// For other methods, this returns the IV.
-    pub fn iv_or_salt(&self) -> &[u8] {
-        &self.iv_or_salt
+    pub fn encrypt_iv_or_salt(&self) -> &[u8] {
+        &self.encrypt_iv_or_salt
     }
 
     /// Get the length of IV (or salt for GCM/ChaCha20-Poly1305 methods).
@@ -435,8 +449,12 @@ impl Cipher {
     /// Get mutable reference to the IV (or salt for GCM/ChaCha20-Poly1305 methods).
     /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM) and ChaCha20-Poly1305, this is the salt.
     /// For other methods, this is the IV.
-    pub fn iv_or_salt_mut(&mut self) -> &mut [u8] {
-        &mut self.iv_or_salt[..]
+    pub fn decrypt_iv_or_salt_mut(&mut self) -> &mut [u8] {
+        &mut self.decrypt_iv_or_salt[..]
+    }
+
+    pub fn encrypt_iv_or_salt_mut(&mut self) -> &mut [u8] {
+        &mut self.encrypt_iv_or_salt[..]
     }
 
     fn new_cipher(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
@@ -466,10 +484,6 @@ impl Cipher {
         }
     }
 
-    pub fn init_decrypt(&mut self) {
-        self.dec = Some(self.new_cipher(&self.iv_or_salt));
-    }
-
     pub fn tag_size(&self) -> usize {
         if self.is_aead() {
             16
@@ -487,11 +501,19 @@ impl Cipher {
                 | Method::ChaCha20IetfPoly1305
                 | Method::XChaCha20IetfPoly1305
                 | Method::Blake3Aes128Gcm
+                | Method::Blake3Aes256Gcm
+        )
+    }
+
+    fn is_aead2022(&self) -> bool {
+        matches!(
+            self.method,
+            Method::Blake3Aes128Gcm | Method::Blake3Aes256Gcm
         )
     }
 
     pub fn encrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {
-        if let Some(enc) = &mut self.enc {
+        if let Some(enc) = &mut self.encrypt {
             enc.encrypt_in_place(input)
         } else {
             Err(io::Error::other("encryption not initialized"))
@@ -499,7 +521,7 @@ impl Cipher {
     }
 
     pub fn decrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {
-        if let Some(dec) = &mut self.dec {
+        if let Some(dec) = &mut self.decrypt {
             dec.decrypt_in_place(input)
         } else {
             Err(io::Error::other("decryption not initialized"))
@@ -510,11 +532,12 @@ impl Cipher {
     pub fn reset(&self) -> Cipher {
         Cipher {
             key: self.key.clone(),
-            iv_or_salt: vec![0u8; self.iv_or_salt_len],
+            encrypt_iv_or_salt: vec![0u8; self.iv_or_salt_len],
+            decrypt_iv_or_salt: vec![0u8; self.iv_or_salt_len],
             iv_or_salt_len: self.iv_or_salt_len,
             key_len: self.key_len,
-            enc: None,
-            dec: None,
+            encrypt: None,
+            decrypt: None,
             method: self.method,
         }
     }

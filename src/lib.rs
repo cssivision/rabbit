@@ -226,7 +226,7 @@ where
             let mut cipher = me.cipher.lock().unwrap();
             while reader.pos < cipher.iv_or_salt_len() {
                 let n = ready!(Pin::new(&mut me.stream)
-                    .poll_read(cx, &mut cipher.iv_or_salt_mut()[reader.pos..]))?;
+                    .poll_read(cx, &mut cipher.decrypt_iv_or_salt_mut()[reader.pos..]))?;
                 if n == 0 {
                     return Poll::Ready(Ok(0));
                 }
@@ -290,7 +290,7 @@ where
             let n = cipher.iv_or_salt_len();
             writer.cap = n;
             writer.buf.resize(n, 0u8);
-            writer.buf[..n].copy_from_slice(cipher.iv_or_salt());
+            writer.buf[..n].copy_from_slice(cipher.encrypt_iv_or_salt());
         }
 
         loop {

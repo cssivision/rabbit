@@ -187,7 +187,7 @@ async fn proxy_packet(
     }
     let iv_or_salt_len = cipher.iv_or_salt_len();
     cipher
-        .iv_or_salt_mut()
+        .decrypt_iv_or_salt_mut()
         .copy_from_slice(&buf[..iv_or_salt_len]);
     cipher.init_decrypt();
     buf.drain(..iv_or_salt_len);
