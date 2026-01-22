@@ -433,6 +433,13 @@ pub enum Method {
     XChaCha20IetfPoly1305,
 }
 
+fn is_aead2022(method: &Method) -> bool {
+    matches!(
+        method,
+        Method::Blake3Aes128Gcm | Method::Blake3Aes256Gcm | Method::Blake3ChaCha20Poly1305
+    )
+}
+
 impl Cipher {
     pub fn new(method: Method, password: &str) -> Cipher {
         let (key_len, iv_or_salt_len) = match method {
@@ -458,7 +465,7 @@ impl Cipher {
             Method::XChaCha20IetfPoly1305 => (32, 32),
         };
 
-        let key = if Self::is_aead2022(&method) {
+        let key = if is_aead2022(&method) {
             password.as_bytes().to_vec()
         } else {
             generate_key(password.as_bytes(), key_len)
@@ -477,12 +484,12 @@ impl Cipher {
     }
 
     pub fn init_encrypt(&mut self) {
-        let iv_or_salt = if !Self::is_aead2022(&self.method) {
-            self.decrypt_iv_or_salt.clone()
-        } else {
+        let iv_or_salt = if self.is_aead2022() {
             let mut iv_or_salt = vec![0u8; self.iv_or_salt_len];
             rand::rng().fill(&mut iv_or_salt[..]);
             iv_or_salt
+        } else {
+            self.decrypt_iv_or_salt.clone()
         };
         self.encrypt = Some(self.new_cipher(&iv_or_salt));
     }
@@ -571,11 +578,8 @@ impl Cipher {
         )
     }
 
-    fn is_aead2022(method: &Method) -> bool {
-        matches!(
-            method,
-            Method::Blake3Aes128Gcm | Method::Blake3Aes256Gcm | Method::Blake3ChaCha20Poly1305
-        )
+    pub fn is_aead2022(&self) -> bool {
+        is_aead2022(&self.method)
     }
 
     pub fn encrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {

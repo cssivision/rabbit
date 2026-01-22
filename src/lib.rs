@@ -25,6 +25,8 @@ pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 pub const DEFAULT_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 
 const PAYLOAD_SIZE_MASK: usize = 0x3fff;
+const MAX_PAYLOAD_SIZE: usize = 0xffff;
+const MAX_MESSAGE_AGE_SECONDS: u64 = 30;
 
 /// A stream wrapper that provides transparent encryption/decryption for async I/O operations.
 ///
@@ -82,6 +84,8 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
     pub fn new(cipher: Cipher, stream: &'a mut A) -> Self {
         let is_aead = cipher.is_aead();
         let tag_size = cipher.tag_size();
+        let is_aead2022 = cipher.is_aead2022();
+        let salt_size = cipher.iv_or_salt_len();
         let cipher = Arc::new(Mutex::new(cipher));
         CipherStream {
             stream,
@@ -95,9 +99,11 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                     Some(AeadReader {
                         buf: BytesMut::with_capacity(4096),
                         pos: 0,
-                        payload_size: 0,
                         tag_size,
-                        state: AeadReaderState::PayloadSize,
+                        salt_size,
+                        state: AeadReaderState::Header,
+                        is_aead2022,
+                        stream_type: StreamType::Request,
                     })
                 } else {
                     None
@@ -110,7 +116,12 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 cap: 0,
                 read_done: false,
                 aead: if is_aead {
-                    Some(AeadWriter { tag_size })
+                    Some(AeadWriter {
+                        tag_size,
+                        salt_size,
+                        is_aead2022,
+                        stream_type: StreamType::Response,
+                    })
                 } else {
                     None
                 },
@@ -119,16 +130,29 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
     }
 }
 
+#[derive(Copy, Clone)]
+enum StreamType {
+    Request = 0,
+    Response = 1,
+}
+
 struct AeadReader {
     buf: BytesMut,
     pos: usize,
-    tag_size: usize, // 16 bytes
-    payload_size: usize,
+    tag_size: usize,
     state: AeadReaderState,
+    // aead2022 specific
+    salt_size: usize,
+    is_aead2022: bool,
+    stream_type: StreamType,
 }
 
 struct AeadWriter {
-    tag_size: usize, // 16 bytes
+    tag_size: usize,
+    // aead2022 specific
+    salt_size: usize,
+    is_aead2022: bool,
+    stream_type: StreamType,
 }
 
 impl AeadWriter {
@@ -155,11 +179,58 @@ impl AeadWriter {
 }
 
 enum AeadReaderState {
-    PayloadSize,
-    Payload,
+    Header,
+    Length,
+    Payload(usize),
 }
 
 impl AeadReader {
+    fn parse_aead2022_header(&mut self) -> io::Result<usize> {
+        let stream_type = self.buf[0];
+        if stream_type != self.stream_type as u8 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "stream type mismatch",
+            ));
+        }
+        let _ = self.buf.split_to(1);
+        let timestamp = u64::from_be_bytes([
+            self.buf[0],
+            self.buf[1],
+            self.buf[2],
+            self.buf[3],
+            self.buf[4],
+            self.buf[5],
+            self.buf[6],
+            self.buf[7],
+        ]);
+        if timestamp.abs_diff(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        ) > MAX_MESSAGE_AGE_SECONDS
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "message must with over 30 seconds",
+            ));
+        }
+        let _ = self.buf.split_to(8);
+
+        if stream_type == StreamType::Response as u8 {
+            let _salt = self.buf.split_to(self.salt_size);
+        }
+        let size = u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize;
+        if size > MAX_PAYLOAD_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "payload size is too large",
+            ));
+        }
+        Ok(size)
+    }
+
     fn poll_read_aead<A>(
         &mut self,
         cx: &mut Context<'_>,
@@ -171,9 +242,17 @@ impl AeadReader {
     {
         loop {
             match self.state {
-                AeadReaderState::PayloadSize => {
-                    self.buf.resize(2 + self.tag_size, 0u8);
-                    while self.pos < 2 + self.tag_size {
+                AeadReaderState::Header => {
+                    if !self.is_aead2022 {
+                        self.state = AeadReaderState::Length;
+                        continue;
+                    }
+                    let header_size = match self.stream_type {
+                        StreamType::Request => 11 + self.tag_size,
+                        StreamType::Response => 11 + self.salt_size + self.tag_size,
+                    };
+                    self.buf.resize(header_size, 0u8);
+                    while self.pos < header_size {
                         let n =
                             ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
                         if n == 0 {
@@ -182,15 +261,32 @@ impl AeadReader {
                         self.pos += n;
                     }
                     let mut cipher = cipher.lock().unwrap();
-                    cipher.decrypt_in_place(&mut self.buf[..2 + self.tag_size])?;
-                    self.payload_size =
+                    cipher.decrypt_in_place(&mut self.buf[..header_size])?;
+                    let payload_size = self.parse_aead2022_header()?;
+                    self.pos = 0;
+                    self.state = AeadReaderState::Payload(payload_size);
+                }
+                AeadReaderState::Length => {
+                    let length_size = 2 + self.tag_size;
+                    self.buf.resize(length_size, 0u8);
+                    while self.pos < length_size {
+                        let n =
+                            ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
+                        if n == 0 {
+                            return Poll::Ready(Ok(BytesMut::new()));
+                        }
+                        self.pos += n;
+                    }
+                    let mut cipher = cipher.lock().unwrap();
+                    cipher.decrypt_in_place(&mut self.buf[..length_size])?;
+                    let payload_size =
                         u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize & PAYLOAD_SIZE_MASK;
                     self.pos = 0;
-                    self.state = AeadReaderState::Payload;
+                    self.state = AeadReaderState::Payload(payload_size);
                 }
-                AeadReaderState::Payload => {
-                    self.buf.resize(self.payload_size + self.tag_size, 0u8);
-                    while self.pos < self.payload_size + self.tag_size {
+                AeadReaderState::Payload(payload_size) => {
+                    self.buf.resize(payload_size + self.tag_size, 0u8);
+                    while self.pos < payload_size + self.tag_size {
                         let n =
                             ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
                         if n == 0 {
@@ -199,10 +295,10 @@ impl AeadReader {
                         self.pos += n;
                     }
                     let mut cipher = cipher.lock().unwrap();
-                    cipher.decrypt_in_place(&mut self.buf[..self.payload_size + self.tag_size])?;
+                    cipher.decrypt_in_place(&mut self.buf[..payload_size + self.tag_size])?;
                     self.pos = 0;
-                    self.state = AeadReaderState::PayloadSize;
-                    let result = self.buf.split_to(self.payload_size);
+                    self.state = AeadReaderState::Length;
+                    let result = self.buf.split_to(payload_size);
                     self.buf.clear();
                     return Poll::Ready(Ok(result));
                 }
