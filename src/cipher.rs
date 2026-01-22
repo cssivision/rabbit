@@ -3,7 +3,11 @@ use std::io;
 use aes::{Aes128, Aes192, Aes256};
 use aes_gcm::{aead::AeadInPlace, Nonce};
 use camellia::{Camellia128, Camellia192, Camellia256};
-use cipher::{consts::U12, BlockCipher, BlockEncryptMut, Key, KeyInit, KeyIvInit, StreamCipher};
+use cipher::{
+    consts::{U12, U8},
+    generic_array::GenericArray,
+    BlockCipher, BlockEncryptMut, Key, KeyInit, KeyIvInit, StreamCipher,
+};
 use ctr::Ctr128BE;
 
 use rand::Rng;
@@ -286,9 +290,52 @@ impl CipherCore for Blake3Aes256Gcm {
     impl_aead_methods!(|n| Nonce::from_slice(n));
 }
 
+struct Blake3ChaCha20Poly1305 {
+    inner: chacha20poly1305::XChaCha20Poly1305,
+    nonce: Vec<u8>,
+}
+
+impl Blake3ChaCha20Poly1305 {
+    fn new(key: &[u8], salt: &[u8]) -> Blake3ChaCha20Poly1305 {
+        let subkey = derive_blake3_subkey(key, salt);
+        let key = chacha20poly1305::Key::from_slice(&subkey[..32]);
+        Blake3ChaCha20Poly1305 {
+            inner: chacha20poly1305::XChaCha20Poly1305::new(key),
+            nonce: vec![0u8; 24],
+        }
+    }
+}
+
+impl CipherCore for Blake3ChaCha20Poly1305 {
+    impl_aead_methods!(|n| chacha20poly1305::XNonce::from_slice(n));
+}
+
 struct ChaCha20IetfPoly1305 {
     inner: chacha20poly1305::ChaCha20Poly1305,
     nonce: Vec<u8>,
+}
+
+struct ChaCha20Poly1305 {
+    inner: chacha20poly1305::ChaChaPoly1305<ChaCha20, U8>,
+    nonce: Vec<u8>,
+}
+
+impl ChaCha20Poly1305 {
+    fn new(key: &[u8], salt: &[u8]) -> ChaCha20Poly1305 {
+        // Use HKDF-SHA1 to derive subkey from key and salt
+        let mut subkey = vec![0u8; key.len()];
+        hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
+            .expect("HKDF-SHA1 key derivation failed");
+        let key = chacha20poly1305::Key::from_slice(&subkey);
+        ChaCha20Poly1305 {
+            inner: chacha20poly1305::ChaChaPoly1305::<ChaCha20, U8>::new(key),
+            nonce: vec![0u8; 8],
+        }
+    }
+}
+
+impl CipherCore for ChaCha20Poly1305 {
+    impl_aead_methods!(|n| GenericArray::<u8, U8>::from_slice(n));
 }
 
 impl ChaCha20IetfPoly1305 {
@@ -370,12 +417,16 @@ pub enum Method {
     Blake3Aes128Gcm,
     #[serde(rename = "2022-blake3-aes-256-gcm")]
     Blake3Aes256Gcm,
+    #[serde(rename = "2022-blake3-chacha20-poly1305")]
+    Blake3ChaCha20Poly1305,
     #[serde(rename = "aes-128-gcm")]
     Aes128Gcm,
     #[serde(rename = "aes-192-gcm")]
     Aes192Gcm,
     #[serde(rename = "aes-256-gcm")]
     Aes256Gcm,
+    #[serde(rename = "chacha20-poly1305")]
+    ChaCha20Poly1305,
     #[serde(rename = "chacha20-ietf-poly1305")]
     ChaCha20IetfPoly1305,
     #[serde(rename = "xchacha20-ietf-poly1305")]
@@ -394,19 +445,27 @@ impl Cipher {
             Method::Aes128Ctr => (16, 16),
             Method::Aes192Ctr => (24, 16),
             Method::Aes256Ctr => (32, 16),
-            Method::ChaCha20 => (32, 8),
-            Method::ChaCha20Ietf => (32, 12),
+            Method::ChaCha20 => (32, 16),
+            Method::ChaCha20Ietf => (32, 16),
             Method::Blake3Aes128Gcm => (16, 16),
             Method::Blake3Aes256Gcm => (32, 32),
+            Method::Blake3ChaCha20Poly1305 => (32, 32),
             Method::Aes128Gcm => (16, 16),
             Method::Aes192Gcm => (24, 24),
             Method::Aes256Gcm => (32, 32),
+            Method::ChaCha20Poly1305 => (32, 32),
             Method::ChaCha20IetfPoly1305 => (32, 32),
             Method::XChaCha20IetfPoly1305 => (32, 32),
         };
 
+        let key = if Self::is_aead2022(&method) {
+            password.as_bytes().to_vec()
+        } else {
+            generate_key(password.as_bytes(), key_len)
+        };
+
         Cipher {
-            key: generate_key(password.as_bytes(), key_len),
+            key,
             key_len,
             iv_or_salt_len,
             encrypt_iv_or_salt: vec![0u8; iv_or_salt_len],
@@ -418,7 +477,7 @@ impl Cipher {
     }
 
     pub fn init_encrypt(&mut self) {
-        let iv_or_salt = if !self.is_aead2022() {
+        let iv_or_salt = if !Self::is_aead2022(&self.method) {
             self.decrypt_iv_or_salt.clone()
         } else {
             let mut iv_or_salt = vec![0u8; self.iv_or_salt_len];
@@ -473,11 +532,16 @@ impl Cipher {
             Method::ChaCha20Ietf => Box::new(ChaCha20Ietf::new(key.into(), iv_or_salt.into())),
             Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, iv_or_salt)),
             Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, iv_or_salt)),
+            Method::Blake3ChaCha20Poly1305 => {
+                Box::new(Blake3ChaCha20Poly1305::new(key, iv_or_salt))
+            }
             // For GCM methods, iv_or_salt is actually salt
             Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, iv_or_salt)),
             Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, iv_or_salt)),
             Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, iv_or_salt)),
             // For ChaCha20-Poly1305, iv_or_salt is actually salt
+            Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, iv_or_salt)),
+            // For ChaCha20-IETF-Poly1305, iv_or_salt is actually salt
             Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, iv_or_salt)),
             // For XChaCha20-Poly1305, iv_or_salt is actually salt
             Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, iv_or_salt)),
@@ -498,17 +562,19 @@ impl Cipher {
             Method::Aes128Gcm
                 | Method::Aes192Gcm
                 | Method::Aes256Gcm
+                | Method::ChaCha20Poly1305
                 | Method::ChaCha20IetfPoly1305
                 | Method::XChaCha20IetfPoly1305
                 | Method::Blake3Aes128Gcm
                 | Method::Blake3Aes256Gcm
+                | Method::Blake3ChaCha20Poly1305
         )
     }
 
-    fn is_aead2022(&self) -> bool {
+    fn is_aead2022(method: &Method) -> bool {
         matches!(
-            self.method,
-            Method::Blake3Aes128Gcm | Method::Blake3Aes256Gcm
+            method,
+            Method::Blake3Aes128Gcm | Method::Blake3Aes256Gcm | Method::Blake3ChaCha20Poly1305
         )
     }
 
