@@ -507,18 +507,16 @@ impl Cipher {
 
     /// Initialize the encryption cipher.
     pub fn init_encrypt(&mut self) {
-        let iv_or_salt = if self.is_aead2022() {
-            rand::rng().fill(&mut self.encrypt_iv_or_salt[..]);
-            &self.encrypt_iv_or_salt
-        } else {
-            &self.decrypt_iv_or_salt
-        };
-        self.encrypt = Some(self.new_cipher(iv_or_salt));
+        if !self.is_aead2022() {
+            self.encrypt_iv_or_salt
+                .copy_from_slice(&self.decrypt_iv_or_salt);
+        }
+        self.encrypt = Some(self.gen(&self.encrypt_iv_or_salt));
     }
 
     /// Initialize the decryption cipher.
     pub fn init_decrypt(&mut self) {
-        self.decrypt = Some(self.new_cipher(&self.decrypt_iv_or_salt));
+        self.decrypt = Some(self.gen(&self.decrypt_iv_or_salt));
     }
 
     /// Get the IV (or salt for GCM methods).
@@ -557,7 +555,7 @@ impl Cipher {
         &mut self.encrypt_iv_or_salt[..]
     }
 
-    fn new_cipher(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
+    fn gen(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
         match self.method {
             Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, iv_or_salt)),
@@ -639,10 +637,20 @@ impl Cipher {
     /// Reset the cipher.
     #[must_use]
     pub fn reset(&self) -> Cipher {
+        let mut encrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
+        rand::rng().fill(&mut encrypt_iv_or_salt[..]);
+        let decrypt_iv_or_salt = if self.is_aead2022() {
+            let mut decrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
+            rand::rng().fill(&mut decrypt_iv_or_salt[..]);
+            decrypt_iv_or_salt
+        } else {
+            self.encrypt_iv_or_salt.clone()
+        };
+
         Cipher {
             key: self.key.clone(),
-            encrypt_iv_or_salt: vec![0u8; self.iv_or_salt_len],
-            decrypt_iv_or_salt: vec![0u8; self.iv_or_salt_len],
+            encrypt_iv_or_salt,
+            decrypt_iv_or_salt,
             iv_or_salt_len: self.iv_or_salt_len,
             key_len: self.key_len,
             encrypt: None,
