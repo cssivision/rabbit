@@ -50,7 +50,7 @@ impl Service {
     }
 
     pub async fn serve(&self) -> io::Result<()> {
-        let cipher = Cipher::new(self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password)?;
         let local_addr = self.config.local_addr.clone();
         let listener = Listener::bind(local_addr).await?;
         log::info!("listening connections on {:?}", self.config.local_addr);

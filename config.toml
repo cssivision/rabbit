@@ -9,6 +9,11 @@ password = "password"
 method = "aes-128-gcm"
 
 [[server]]
+local_addr = "127.0.0.1:9008"
+password = "passwordpassword"
+method = "2022-blake3-aes-128-gcm"
+
+[[server]]
 local_addr = "temp.sock"
 password = "password"
 method = "aes-128-cfb"
@@ -17,7 +22,7 @@ method = "aes-128-cfb"
 local_addr = "127.0.0.1:9006"
 password = "password"
 method = "aes-128-cfb"
-mode = "udp"
+network = "udp"
 
 [[client]]
 local_addr = "127.0.0.1:6009"
@@ -32,6 +37,12 @@ password = "password"
 method = "aes-128-gcm"
 
 [[client]]
+local_addr = "127.0.0.1:6011"
+server_addr = "127.0.0.1:9008"
+password = "passwordpassword"
+method = "2022-blake3-aes-128-gcm"
+
+[[client]]
 local_addr = "temp.sock"
 server_addr = "127.0.0.1:9006"
 password = "password"
@@ -42,5 +53,5 @@ local_addr = "127.0.0.1:6010"
 server_addr = "127.0.0.1:9006"
 password = "password"
 method = "aes-128-cfb"
-mode = "udp"
+network = "udp"
 redir_addr = "127.0.0.1:8080"

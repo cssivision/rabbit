@@ -15,7 +15,7 @@ pub struct Config {
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
-pub enum Mode {
+pub enum Network {
     #[default]
     Tcp,
     Udp,
@@ -28,7 +28,7 @@ pub struct Server {
     pub password: String,
     pub method: Method,
     #[serde(default)]
-    pub mode: Mode,
+    pub network: Network,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,7 +46,7 @@ pub struct Redir {
     pub password: String,
     pub method: Method,
     #[serde(default)]
-    pub mode: Mode,
+    pub network: Network,
     pub redir_addr: Option<SocketAddr>,
 }
 

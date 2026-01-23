@@ -457,7 +457,7 @@ impl Cipher {
     /// Create a new cipher.
     /// The password is used to derive the key for the cipher.
     /// The method is the cipher method to use.
-    pub fn new(method: Method, password: &str) -> Cipher {
+    pub fn new(method: Method, password: &str) -> io::Result<Cipher> {
         let (key_len, iv_or_salt_len) = match method {
             Method::Aes128Cfb => (16, 16),
             Method::Aes192Cfb => (24, 16),
@@ -482,12 +482,18 @@ impl Cipher {
         };
 
         let key = if is_aead2022(&method) {
+            if password.len() != key_len {
+                return Err(io::Error::other(format!(
+                    "key length must be {} for 2022 AEAD ciphers",
+                    key_len
+                )));
+            }
             password.as_bytes().to_vec()
         } else {
             generate_key(password.as_bytes(), key_len)
         };
 
-        Cipher {
+        Ok(Cipher {
             key,
             key_len,
             iv_or_salt_len,
@@ -496,7 +502,7 @@ impl Cipher {
             encrypt: None,
             decrypt: None,
             method,
-        }
+        })
     }
 
     /// Initialize the encryption cipher.
@@ -504,6 +510,7 @@ impl Cipher {
         let iv_or_salt = if self.is_aead2022() {
             let mut iv_or_salt = vec![0u8; self.iv_or_salt_len];
             rand::rng().fill(&mut iv_or_salt[..]);
+            self.encrypt_iv_or_salt.copy_from_slice(&iv_or_salt);
             iv_or_salt
         } else {
             self.decrypt_iv_or_salt.clone()

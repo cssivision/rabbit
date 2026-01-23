@@ -151,7 +151,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
 }
 
 /// Stream type.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 enum StreamType {
     Request = 0,
     Response = 1,
@@ -219,15 +219,19 @@ impl AeadWriter {
                     } else {
                         result[9..11].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
                     }
+                    // Encrypt first header
+                    cipher.encrypt_in_place(
+                        &mut result[..header_size - self.tag_size - payload.len()],
+                    )?;
 
                     // Copy payload data
                     result
                         [header_size - self.tag_size - payload.len()..header_size - self.tag_size]
                         .copy_from_slice(payload);
-                    // Encrypt payload (payload + tag)
-                    cipher
-                        .encrypt_in_place(&mut result[header_size - self.tag_size..header_size])?;
-                    cipher.encrypt_in_place(&mut result)?;
+                    // Encrypt second header
+                    cipher.encrypt_in_place(
+                        &mut result[header_size - payload.len() - self.tag_size..header_size],
+                    )?;
                     self.state = AeadWriterState::Payload;
                     return Ok(result);
                 }

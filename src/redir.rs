@@ -15,7 +15,7 @@ use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
 use socket2::SockAddr;
 
 use crate::cipher::Cipher;
-use crate::config::{self, Mode};
+use crate::config::{self, Network};
 use crate::util::generate_raw_addr;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
@@ -55,10 +55,10 @@ impl Service {
     }
 
     pub async fn serve(&self) -> io::Result<()> {
-        match self.config.mode {
-            Mode::Tcp => self.stream_relay().await,
-            Mode::Udp => self.packet_relay().await,
-            Mode::Both => {
+        match self.config.network {
+            Network::Tcp => self.stream_relay().await,
+            Network::Udp => self.packet_relay().await,
+            Network::Both => {
                 let fut1 = self.stream_relay();
                 let fut2 = self.packet_relay();
                 let _ = join(fut1, fut2).await;
@@ -68,7 +68,7 @@ impl Service {
     }
 
     pub async fn stream_relay(&self) -> io::Result<()> {
-        let cipher = Cipher::new(self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password)?;
         let local_addr = self.config.local_addr;
         let listener = TcpListener::bind(local_addr).await?;
         log::info!("listening connections on {:?}", self.config.local_addr);
@@ -92,7 +92,7 @@ impl Service {
     }
 
     pub async fn packet_relay(&self) -> io::Result<()> {
-        let cipher = Cipher::new(self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password)?;
         let socket = UdpSocket::bind(self.config.local_addr)?;
         log::info!("listening udp on {:?}", self.config.local_addr);
         let (sender, receiver) = channel(1024);
