@@ -80,8 +80,27 @@ struct Writer {
     aead: Option<AeadWriter>,
 }
 
+enum ServerType {
+    Local,
+    Remote,
+}
+
 impl<'a, A: ?Sized> CipherStream<'a, A> {
-    pub fn new(cipher: Cipher, stream: &'a mut A) -> Self {
+    /// Create a new cipher stream for local server.
+    pub fn local(cipher: Cipher, stream: &'a mut A) -> Self {
+        Self::new(cipher, stream, ServerType::Local)
+    }
+
+    /// Create a new cipher stream for remote server.
+    pub fn remote(cipher: Cipher, stream: &'a mut A) -> Self {
+        Self::new(cipher, stream, ServerType::Remote)
+    }
+
+    fn new(cipher: Cipher, stream: &'a mut A, server_type: ServerType) -> Self {
+        let (s1, s2) = match server_type {
+            ServerType::Local => (StreamType::Response, StreamType::Request),
+            ServerType::Remote => (StreamType::Request, StreamType::Response),
+        };
         let is_aead = cipher.is_aead();
         let tag_size = cipher.tag_size();
         let is_aead2022 = cipher.is_aead2022();
@@ -103,7 +122,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                         salt_size,
                         state: AeadReaderState::Header,
                         is_aead2022,
-                        stream_type: StreamType::Request,
+                        stream_type: s1,
                     })
                 } else {
                     None
@@ -118,9 +137,10 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 aead: if is_aead {
                     Some(AeadWriter {
                         tag_size,
+                        state: AeadWriterState::Header,
                         salt_size,
                         is_aead2022,
-                        stream_type: StreamType::Response,
+                        stream_type: s2,
                     })
                 } else {
                     None
@@ -130,12 +150,14 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
     }
 }
 
-#[derive(Copy, Clone)]
+/// Stream type.
+#[derive(Copy, Clone, PartialEq)]
 enum StreamType {
     Request = 0,
     Response = 1,
 }
 
+/// AEAD reader for decrypting data in AEAD format.
 struct AeadReader {
     buf: BytesMut,
     pos: usize,
@@ -147,8 +169,16 @@ struct AeadReader {
     stream_type: StreamType,
 }
 
+/// AEAD writer state.
+enum AeadWriterState {
+    Header,
+    Payload,
+}
+
+/// AEAD writer for encrypting data in AEAD format.
 struct AeadWriter {
     tag_size: usize,
+    state: AeadWriterState,
     // aead2022 specific
     salt_size: usize,
     is_aead2022: bool,
@@ -158,23 +188,66 @@ struct AeadWriter {
 impl AeadWriter {
     /// Encrypt payload in AEAD format.
     /// Format: [encrypted payload length (2 bytes)][length tag (16 bytes)][encrypted payload][payload tag (16 bytes)]
-    fn encrypt_payload(&self, payload: &[u8], cipher: &mut Cipher) -> io::Result<BytesMut> {
-        let mut result = BytesMut::with_capacity(2 + self.tag_size + payload.len() + self.tag_size);
-        result.resize(2 + self.tag_size + payload.len() + self.tag_size, 0u8);
+    fn encrypt_payload(&mut self, payload: &[u8], cipher: &mut Cipher) -> io::Result<BytesMut> {
+        loop {
+            match self.state {
+                AeadWriterState::Header => {
+                    if !self.is_aead2022 {
+                        self.state = AeadWriterState::Payload;
+                        continue;
+                    }
+                    let header_size = match self.stream_type {
+                        StreamType::Request => 11 + self.tag_size + payload.len() + self.tag_size,
+                        StreamType::Response => {
+                            11 + self.salt_size + self.tag_size + payload.len() + self.tag_size
+                        }
+                    };
+                    let mut result = BytesMut::with_capacity(header_size);
+                    result.resize(header_size, 0u8);
+                    result[0] = self.stream_type as u8;
+                    result[1..9].copy_from_slice(
+                        &std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            .to_be_bytes(),
+                    );
+                    if self.stream_type == StreamType::Response {
+                        result[9..9 + self.salt_size].copy_from_slice(&cipher.decrypt_iv_or_salt());
+                        result[9 + self.salt_size..11 + self.salt_size]
+                            .copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
+                    } else {
+                        result[9..11].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
+                    }
 
-        // Set payload length (first 2 bytes)
-        result[..2].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
-
-        // Encrypt payload length (first 2 bytes + tag)
-        cipher.encrypt_in_place(&mut result[..2 + self.tag_size])?;
-
-        // Copy payload data
-        result[2 + self.tag_size..2 + self.tag_size + payload.len()].copy_from_slice(payload);
-
-        // Encrypt payload (payload + tag)
-        cipher.encrypt_in_place(&mut result[2 + self.tag_size..])?;
-
-        Ok(result)
+                    // Copy payload data
+                    result
+                        [header_size - self.tag_size - payload.len()..header_size - self.tag_size]
+                        .copy_from_slice(payload);
+                    // Encrypt payload (payload + tag)
+                    cipher
+                        .encrypt_in_place(&mut result[header_size - self.tag_size..header_size])?;
+                    cipher.encrypt_in_place(&mut result)?;
+                    self.state = AeadWriterState::Payload;
+                    return Ok(result);
+                }
+                AeadWriterState::Payload => {
+                    let mut result =
+                        BytesMut::with_capacity(2 + self.tag_size + payload.len() + self.tag_size);
+                    result.resize(2 + self.tag_size + payload.len() + self.tag_size, 0u8);
+                    // Set payload length (first 2 bytes)
+                    result[..2].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
+                    // Encrypt payload length (first 2 bytes + tag)
+                    cipher.encrypt_in_place(&mut result[..2 + self.tag_size])?;
+                    // Copy payload data
+                    result[2 + self.tag_size..2 + self.tag_size + payload.len()]
+                        .copy_from_slice(payload);
+                    // Encrypt payload (payload + tag)
+                    cipher.encrypt_in_place(&mut result[2 + self.tag_size..])?;
+                    return Ok(result);
+                }
+            }
+        }
     }
 }
 
@@ -411,7 +484,7 @@ where
             }
 
             let mut cipher = me.cipher.lock().unwrap();
-            let data = if let Some(aead) = writer.aead.as_ref() {
+            let data = if let Some(aead) = writer.aead.as_mut() {
                 // AEAD: encrypt payload with format [encrypted length][length tag][encrypted payload][payload tag]
                 aead.encrypt_payload(buf, &mut cipher)?
             } else {

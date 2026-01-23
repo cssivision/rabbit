@@ -5,6 +5,7 @@ use std::time::Duration;
 use awak::net::TcpStream;
 use awak::time::timeout;
 use awak::util::{copy_bidirectional, IdleTimeout};
+use bytes::BytesMut;
 use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::cipher::Cipher;
@@ -81,9 +82,15 @@ where
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
 
-    let mut socket2 = CipherStream::new(cipher, &mut socket2);
+    let is_aead2022 = cipher.is_aead2022();
+    let mut socket2 = CipherStream::local(cipher, &mut socket2);
 
-    let rawaddr = generate_raw_addr(&host, port);
+    let mut rawaddr = generate_raw_addr(&host, port);
+    if is_aead2022 {
+        let padding = BytesMut::zeroed(16);
+        rawaddr.extend_from_slice(&u16::to_be_bytes(padding.len() as u16));
+        rawaddr.extend_from_slice(&padding);
+    }
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(

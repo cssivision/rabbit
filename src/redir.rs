@@ -9,6 +9,7 @@ use std::time::Duration;
 use awak::net::{TcpListener, TcpStream, UdpSocket};
 use awak::time::timeout;
 use awak::util::{copy_bidirectional, IdleTimeout};
+use bytes::BytesMut;
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
 use socket2::SockAddr;
@@ -263,12 +264,20 @@ where
 {
     let mut socket2 = timeout(DEFAULT_CONNECT_TIMEOUT, TcpStream::connect(&server_addr)).await??;
     log::debug!("connected to server {}", server_addr);
-    let mut socket2 = CipherStream::new(cipher, &mut socket2);
 
-    let rawaddr = generate_raw_addr(
+    let is_aead2022 = cipher.is_aead2022();
+
+    let mut socket2 = CipherStream::local(cipher, &mut socket2);
+
+    let mut rawaddr = generate_raw_addr(
         &original_dst_addr.ip().to_string(),
         original_dst_addr.port(),
     );
+    if is_aead2022 {
+        let padding = BytesMut::zeroed(16);
+        rawaddr.extend_from_slice(&u16::to_be_bytes(padding.len() as u16));
+        rawaddr.extend_from_slice(&padding);
+    }
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(

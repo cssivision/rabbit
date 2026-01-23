@@ -237,12 +237,21 @@ async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let socket1 = &mut CipherStream::new(cipher, socket1);
+    let is_aead2022 = cipher.is_aead2022();
+    let socket1 = &mut CipherStream::remote(cipher, socket1);
     let (_, host, port) = timeout(DEFAULT_GET_ADDR_INFO_TIMEOUT, get_addr_info(socket1))
         .await
         .map_err(|e| io::Error::other(format!("get addr info timeout: {e:?}")))?
         .map_err(|e| io::Error::other(format!("get addr info fail: {e:?}")))?;
     log::debug!("proxy to address: {}:{}", host, port);
+
+    if is_aead2022 {
+        let buf = &mut [0u8; 2];
+        socket1.read_exact(buf).await?;
+        let padding_len = u16::from_be_bytes([buf[0], buf[1]]);
+        let mut padding = vec![0u8; padding_len as usize];
+        socket1.read_exact(&mut padding).await?;
+    }
 
     let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host))
         .await

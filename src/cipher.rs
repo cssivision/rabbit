@@ -26,25 +26,38 @@ trait CipherCore {
     fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()>;
 }
 
+/// CFB mode cipher.
 struct Cfb<C: BlockCipher + BlockEncryptMut> {
     enc: cfb_mode::BufEncryptor<C>,
     dec: cfb_mode::BufDecryptor<C>,
 }
 
+/// AES-128 CFB mode cipher.
 type Aes128Cfb = Cfb<Aes128>;
+/// AES-192 CFB mode cipher.
 type Aes192Cfb = Cfb<Aes192>;
+/// AES-256 CFB mode cipher.
 type Aes256Cfb = Cfb<Aes256>;
 
+/// Camellia-128 CFB mode cipher.
 type Camellia128Cfb = Cfb<Camellia128>;
+/// Camellia-192 CFB mode cipher.
 type Camellia192Cfb = Cfb<Camellia192>;
+/// Camellia-256 CFB mode cipher.
 type Camellia256Cfb = Cfb<Camellia256>;
 
+/// AES-128 CTR mode cipher.
 type Aes128Ctr = Ctr128BE<Aes128>;
+/// AES-192 CTR mode cipher.
 type Aes192Ctr = Ctr128BE<Aes192>;
+/// AES-256 CTR mode cipher.
 type Aes256Ctr = Ctr128BE<Aes256>;
 
+/// AES-128 GCM mode cipher.
 type Aes128Gcm = AesGcm<aes_gcm::Aes128Gcm>;
+/// AES-192 GCM mode cipher.
 type Aes192Gcm = AesGcm<aes_gcm::AesGcm<aes::Aes192, U12>>;
+/// AES-256 GCM mode cipher.
 type Aes256Gcm = AesGcm<aes_gcm::Aes256Gcm>;
 
 // ChaCha20 is a type alias for ChaCha20Legacy
@@ -441,6 +454,9 @@ fn is_aead2022(method: &Method) -> bool {
 }
 
 impl Cipher {
+    /// Create a new cipher.
+    /// The password is used to derive the key for the cipher.
+    /// The method is the cipher method to use.
     pub fn new(method: Method, password: &str) -> Cipher {
         let (key_len, iv_or_salt_len) = match method {
             Method::Aes128Cfb => (16, 16),
@@ -483,6 +499,7 @@ impl Cipher {
         }
     }
 
+    /// Initialize the encryption cipher.
     pub fn init_encrypt(&mut self) {
         let iv_or_salt = if self.is_aead2022() {
             let mut iv_or_salt = vec![0u8; self.iv_or_salt_len];
@@ -494,15 +511,27 @@ impl Cipher {
         self.encrypt = Some(self.new_cipher(&iv_or_salt));
     }
 
+    /// Initialize the decryption cipher.
     pub fn init_decrypt(&mut self) {
         self.decrypt = Some(self.new_cipher(&self.decrypt_iv_or_salt));
     }
 
     /// Get the IV (or salt for GCM methods).
-    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM), this returns the salt.
+    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM,
+    /// Blake3Aes128Gcm, Blake3Aes256Gcm, Blake3ChaCha20Poly1305,
+    /// ChaCha20Poly1305, ChaCha20IetfPoly1305, XChaCha20IetfPoly1305), this returns the salt.
     /// For other methods, this returns the IV.
     pub fn encrypt_iv_or_salt(&self) -> &[u8] {
         &self.encrypt_iv_or_salt
+    }
+
+    /// Get the IV (or salt for GCM methods).
+    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM,
+    /// Blake3Aes128Gcm, Blake3Aes256Gcm, Blake3ChaCha20Poly1305,
+    /// ChaCha20Poly1305, ChaCha20IetfPoly1305, XChaCha20IetfPoly1305), this returns the salt.
+    /// For other methods, this returns the IV.
+    pub fn decrypt_iv_or_salt(&self) -> &[u8] {
+        &self.decrypt_iv_or_salt
     }
 
     /// Get the length of IV (or salt for GCM/ChaCha20-Poly1305 methods).
@@ -563,6 +592,7 @@ impl Cipher {
         }
     }
 
+    /// Check if the cipher is an AEAD cipher.
     pub fn is_aead(&self) -> bool {
         matches!(
             self.method,
@@ -578,10 +608,12 @@ impl Cipher {
         )
     }
 
+    /// Check if the cipher is a 2022 AEAD cipher.
     pub fn is_aead2022(&self) -> bool {
         is_aead2022(&self.method)
     }
 
+    /// Encrypt data in place.
     pub fn encrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {
         if let Some(enc) = &mut self.encrypt {
             enc.encrypt_in_place(input)
@@ -590,6 +622,7 @@ impl Cipher {
         }
     }
 
+    /// Decrypt data in place.
     pub fn decrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {
         if let Some(dec) = &mut self.decrypt {
             dec.decrypt_in_place(input)
@@ -598,6 +631,7 @@ impl Cipher {
         }
     }
 
+    /// Reset the cipher.
     #[must_use]
     pub fn reset(&self) -> Cipher {
         Cipher {
