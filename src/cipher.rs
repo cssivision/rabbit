@@ -260,7 +260,7 @@ impl<G> CipherCore for AesGcm<G>
 where
     G: AeadInPlace + KeyInit + Send + Sync + 'static,
 {
-    impl_aead_methods!(|n| Nonce::from_slice(n));
+    impl_aead_methods!(Nonce::from_slice);
 }
 
 struct Blake3Aes128Gcm {
@@ -280,7 +280,7 @@ impl Blake3Aes128Gcm {
 }
 
 impl CipherCore for Blake3Aes128Gcm {
-    impl_aead_methods!(|n| Nonce::from_slice(n));
+    impl_aead_methods!(Nonce::from_slice);
 }
 
 struct Blake3Aes256Gcm {
@@ -300,7 +300,7 @@ impl Blake3Aes256Gcm {
 }
 
 impl CipherCore for Blake3Aes256Gcm {
-    impl_aead_methods!(|n| Nonce::from_slice(n));
+    impl_aead_methods!(Nonce::from_slice);
 }
 
 struct Blake3ChaCha20Poly1305 {
@@ -320,7 +320,7 @@ impl Blake3ChaCha20Poly1305 {
 }
 
 impl CipherCore for Blake3ChaCha20Poly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::XNonce::from_slice(n));
+    impl_aead_methods!(chacha20poly1305::XNonce::from_slice);
 }
 
 struct ChaCha20IetfPoly1305 {
@@ -348,7 +348,7 @@ impl ChaCha20Poly1305 {
 }
 
 impl CipherCore for ChaCha20Poly1305 {
-    impl_aead_methods!(|n| GenericArray::<u8, U8>::from_slice(n));
+    impl_aead_methods!(GenericArray::<u8, U8>::from_slice);
 }
 
 impl ChaCha20IetfPoly1305 {
@@ -366,7 +366,7 @@ impl ChaCha20IetfPoly1305 {
 }
 
 impl CipherCore for ChaCha20IetfPoly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::Nonce::from_slice(n));
+    impl_aead_methods!(chacha20poly1305::Nonce::from_slice);
 }
 
 struct XChaCha20IetfPoly1305 {
@@ -388,7 +388,7 @@ impl XChaCha20IetfPoly1305 {
 }
 
 impl CipherCore for XChaCha20IetfPoly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::XNonce::from_slice(n));
+    impl_aead_methods!(chacha20poly1305::XNonce::from_slice);
 }
 
 pub struct Cipher {

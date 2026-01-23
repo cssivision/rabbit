@@ -213,7 +213,7 @@ impl AeadWriter {
                             .to_be_bytes(),
                     );
                     if self.stream_type == StreamType::Response {
-                        result[9..9 + self.salt_size].copy_from_slice(&cipher.decrypt_iv_or_salt());
+                        result[9..9 + self.salt_size].copy_from_slice(cipher.decrypt_iv_or_salt());
                         result[9 + self.salt_size..11 + self.salt_size]
                             .copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
                     } else {
