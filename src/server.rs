@@ -14,7 +14,7 @@ use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream};
 
 use crate::cipher::Cipher;
-use crate::config::{self, Addr, Mode};
+use crate::config::{self, Addr, Network};
 use crate::listener::Listener;
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
@@ -58,7 +58,7 @@ impl Service {
     }
 
     pub async fn stream_relay(&self) -> io::Result<()> {
-        let cipher = Cipher::new(self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password)?;
         let listener = Listener::bind(self.config.local_addr.clone()).await?;
         log::info!("listening on {:?}", self.config.local_addr);
         loop {
@@ -74,10 +74,10 @@ impl Service {
     }
 
     pub async fn serve(&self) -> io::Result<()> {
-        match self.config.mode {
-            Mode::Tcp => self.stream_relay().await,
-            Mode::Udp => self.packet_relay().await,
-            Mode::Both => {
+        match self.config.network {
+            Network::Tcp => self.stream_relay().await,
+            Network::Udp => self.packet_relay().await,
+            Network::Both => {
                 let fut1 = self.stream_relay();
                 let fut2 = self.packet_relay();
                 let _ = join(fut1, fut2).await;
@@ -87,7 +87,7 @@ impl Service {
     }
 
     pub async fn packet_relay(&self) -> io::Result<()> {
-        let cipher = Cipher::new(self.config.method, &self.config.password);
+        let cipher = Cipher::new(self.config.method, &self.config.password)?;
         let addr = match &self.config.local_addr {
             Addr::Path(addr) => {
                 return Err(io::Error::new(
@@ -187,7 +187,7 @@ async fn proxy_packet(
     }
     let iv_or_salt_len = cipher.iv_or_salt_len();
     cipher
-        .iv_or_salt_mut()
+        .decrypt_iv_or_salt_mut()
         .copy_from_slice(&buf[..iv_or_salt_len]);
     cipher.init_decrypt();
     buf.drain(..iv_or_salt_len);
@@ -237,12 +237,21 @@ async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    let socket1 = &mut CipherStream::new(cipher, socket1);
+    let is_aead2022 = cipher.is_aead2022();
+    let socket1 = &mut CipherStream::remote(cipher, socket1);
     let (_, host, port) = timeout(DEFAULT_GET_ADDR_INFO_TIMEOUT, get_addr_info(socket1))
         .await
         .map_err(|e| io::Error::other(format!("get addr info timeout: {e:?}")))?
         .map_err(|e| io::Error::other(format!("get addr info fail: {e:?}")))?;
     log::debug!("proxy to address: {}:{}", host, port);
+
+    if is_aead2022 {
+        let buf = &mut [0u8; 2];
+        socket1.read_exact(buf).await?;
+        let padding_len = u16::from_be_bytes([buf[0], buf[1]]);
+        let mut padding = vec![0u8; padding_len as usize];
+        socket1.read_exact(&mut padding).await?;
+    }
 
     let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host))
         .await
