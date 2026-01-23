@@ -508,14 +508,12 @@ impl Cipher {
     /// Initialize the encryption cipher.
     pub fn init_encrypt(&mut self) {
         let iv_or_salt = if self.is_aead2022() {
-            let mut iv_or_salt = vec![0u8; self.iv_or_salt_len];
-            rand::rng().fill(&mut iv_or_salt[..]);
-            self.encrypt_iv_or_salt.copy_from_slice(&iv_or_salt);
-            iv_or_salt
+            rand::rng().fill(&mut self.encrypt_iv_or_salt[..]);
+            &self.encrypt_iv_or_salt
         } else {
-            self.decrypt_iv_or_salt.clone()
+            &self.decrypt_iv_or_salt
         };
-        self.encrypt = Some(self.new_cipher(&iv_or_salt));
+        self.encrypt = Some(self.new_cipher(iv_or_salt));
     }
 
     /// Initialize the decryption cipher.
