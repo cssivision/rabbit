@@ -10,7 +10,7 @@ method = "aes-128-gcm"
 
 [[server]]
 local_addr = "127.0.0.1:9008"
-password = "passwordpassword"
+password = "cCOgj5XnbkAoGKhaT/qBqA=="
 method = "2022-blake3-aes-128-gcm"
 
 [[server]]
@@ -39,7 +39,7 @@ method = "aes-128-gcm"
 [[client]]
 local_addr = "127.0.0.1:6011"
 server_addr = "127.0.0.1:9008"
-password = "passwordpassword"
+password = "cCOgj5XnbkAoGKhaT/qBqA=="
 method = "2022-blake3-aes-128-gcm"
 
 [[client]]

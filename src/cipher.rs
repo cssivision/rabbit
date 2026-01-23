@@ -2,6 +2,7 @@ use std::io;
 
 use aes::{Aes128, Aes192, Aes256};
 use aes_gcm::{aead::AeadInPlace, Nonce};
+use base64::Engine;
 use camellia::{Camellia128, Camellia192, Camellia256};
 use cipher::{
     consts::{U12, U8},
@@ -482,13 +483,16 @@ impl Cipher {
         };
 
         let key = if is_aead2022(&method) {
-            if password.len() != key_len {
+            let psk = base64::prelude::BASE64_STANDARD
+                .decode(password)
+                .map_err(io::Error::other)?;
+            if psk.len() != key_len {
                 return Err(io::Error::other(format!(
                     "key length must be {} for 2022 AEAD ciphers",
                     key_len
                 )));
             }
-            password.as_bytes().to_vec()
+            psk
         } else {
             generate_key(password.as_bytes(), key_len)
         };
