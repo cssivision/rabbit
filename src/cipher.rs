@@ -64,6 +64,8 @@ type Aes256Gcm = AesGcm<aes_gcm::Aes256Gcm>;
 type ChaCha20 = chacha20::ChaCha20Legacy;
 // ChaCha20Ietf is a type alias for ChaCha20
 type ChaCha20Ietf = chacha20::ChaCha20;
+// Salsa20 is a type alias for Salsa20
+type Salsa20 = salsa20::Salsa20;
 
 macro_rules! impl_cfb {
     ($name:ident, $cipher:ty) => {
@@ -136,6 +138,20 @@ impl CipherCore for ChaCha20 {
 }
 
 impl CipherCore for ChaCha20Ietf {
+    /// Encrypt data in place.
+    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        self.apply_keystream(data);
+        Ok(())
+    }
+
+    /// Decrypt data in place.
+    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        self.apply_keystream(data);
+        Ok(())
+    }
+}
+
+impl CipherCore for Salsa20 {
     /// Encrypt data in place.
     fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
         self.apply_keystream(data);
@@ -420,6 +436,8 @@ pub enum Method {
     ChaCha20,
     #[serde(rename = "chacha20-ietf")]
     ChaCha20Ietf,
+    #[serde(rename = "salsa20")]
+    Salsa20,
     #[serde(rename = "2022-blake3-aes-128-gcm")]
     Blake3Aes128Gcm,
     #[serde(rename = "2022-blake3-aes-256-gcm")]
@@ -464,6 +482,7 @@ impl Cipher {
             Method::Aes256Ctr => (32, 16),
             Method::ChaCha20 => (32, 16),
             Method::ChaCha20Ietf => (32, 16),
+            Method::Salsa20 => (32, 8),
             Method::Blake3Aes128Gcm => (16, 16),
             Method::Blake3Aes256Gcm => (32, 32),
             Method::Blake3ChaCha20Poly1305 => (32, 32),
@@ -566,6 +585,7 @@ impl Cipher {
             Method::Aes256Ctr => Box::new(Aes256Ctr::new(key.into(), iv_or_salt.into())),
             Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv_or_salt.into())),
             Method::ChaCha20Ietf => Box::new(ChaCha20Ietf::new(key.into(), iv_or_salt.into())),
+            Method::Salsa20 => Box::new(Salsa20::new(key.into(), iv_or_salt.into())),
             Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, iv_or_salt)),
             Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, iv_or_salt)),
             Method::Blake3ChaCha20Poly1305 => {
