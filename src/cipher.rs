@@ -14,9 +14,8 @@ use ctr::Ctr128BE;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::util::{generate_key, hkdf_sha1};
+use crate::util::{derive_blake3_subkey, generate_key, hkdf_sha1};
 
-const AEAD2022_SESSION_SUBKEY_CONTEXT: &str = "shadowsocks 2022 session subkey";
 const AEAD_SUBKEY_INFO: &[u8] = b"ss-subkey";
 
 trait CipherCore {
@@ -148,12 +147,6 @@ impl CipherCore for ChaCha20Ietf {
         self.apply_keystream(data);
         Ok(())
     }
-}
-
-fn derive_blake3_subkey(key: &[u8], salt: &[u8]) -> Vec<u8> {
-    let mut key_material = key.to_vec();
-    key_material.extend_from_slice(salt);
-    blake3::derive_key(AEAD2022_SESSION_SUBKEY_CONTEXT, &key_material).to_vec()
 }
 
 struct AesGcm<G>

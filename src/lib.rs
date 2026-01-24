@@ -262,7 +262,7 @@ enum AeadReaderState {
 }
 
 impl AeadReader {
-    fn parse_aead2022_header(&mut self) -> io::Result<usize> {
+    fn parse_aead2022_header(&mut self, request_salt: &[u8]) -> io::Result<usize> {
         let stream_type = self.buf[0];
         if stream_type != self.stream_type as u8 {
             return Err(io::Error::new(
@@ -296,7 +296,13 @@ impl AeadReader {
         let _ = self.buf.split_to(8);
 
         if stream_type == StreamType::Response as u8 {
-            let _salt = self.buf.split_to(self.salt_size);
+            let salt = self.buf.split_to(self.salt_size);
+            if salt != request_salt {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "request salt invalid",
+                ));
+            }
         }
         let size = u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize;
         if size > MAX_PAYLOAD_SIZE {
@@ -339,7 +345,7 @@ impl AeadReader {
                     }
                     let mut cipher = cipher.lock().unwrap();
                     cipher.decrypt_in_place(&mut self.buf[..header_size])?;
-                    let payload_size = self.parse_aead2022_header()?;
+                    let payload_size = self.parse_aead2022_header(cipher.encrypt_iv_or_salt())?;
                     self.pos = 0;
                     self.state = AeadReaderState::Payload(payload_size);
                 }

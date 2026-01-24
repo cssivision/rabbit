@@ -8,7 +8,14 @@ use sha1::Sha1;
 
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 
-static MD5_LENGTH: u32 = 16;
+const MD5_LENGTH: u32 = 16;
+const AEAD2022_SESSION_SUBKEY_CONTEXT: &str = "shadowsocks 2022 session subkey";
+
+pub fn derive_blake3_subkey(key: &[u8], salt: &[u8]) -> Vec<u8> {
+    let mut key_material = key.to_vec();
+    key_material.extend_from_slice(salt);
+    blake3::derive_key(AEAD2022_SESSION_SUBKEY_CONTEXT, &key_material).to_vec()
+}
 
 pub fn hkdf_sha1(secret: &[u8], salt: &[u8], info: &[u8], outkey: &mut [u8]) -> io::Result<()> {
     let hk = Hkdf::<Sha1>::new(Some(salt), secret);
