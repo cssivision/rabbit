@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
-use awak::net::{TcpListener, TcpStream, UdpSocket};
+use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
 use awak::util::{copy_bidirectional, IdleTimeout};
 use bytes::BytesMut;
@@ -16,6 +16,7 @@ use socket2::SockAddr;
 
 use crate::cipher::Cipher;
 use crate::config::{self, Network};
+use crate::listener;
 use crate::util::generate_raw_addr;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
@@ -70,7 +71,7 @@ impl Service {
     pub async fn stream_relay(&self) -> io::Result<()> {
         let cipher = Cipher::new(self.config.method, &self.config.password)?;
         let local_addr = self.config.local_addr;
-        let listener = TcpListener::bind(local_addr).await?;
+        let listener = listener::bind_tcp(local_addr)?;
         log::info!("listening connections on {:?}", self.config.local_addr);
         loop {
             let (mut socket, addr) = listener.accept().await?;
@@ -93,7 +94,7 @@ impl Service {
 
     pub async fn packet_relay(&self) -> io::Result<()> {
         let cipher = Cipher::new(self.config.method, &self.config.password)?;
-        let socket = UdpSocket::bind(self.config.local_addr)?;
+        let socket = listener::bind_udp(self.config.local_addr)?;
         log::info!("listening udp on {:?}", self.config.local_addr);
         let (sender, receiver) = channel(1024);
         let udp_relay = UdpRelay {

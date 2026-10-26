@@ -15,7 +15,7 @@ use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream};
 
 use crate::cipher::Cipher;
 use crate::config::{self, Addr, Network};
-use crate::listener::Listener;
+use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::CipherStream;
@@ -97,7 +97,7 @@ impl Service {
             }
             Addr::Socket(addr) => addr,
         };
-        let socket = UdpSocket::bind(addr)?;
+        let socket = listener::bind_udp(*addr)?;
         log::info!("listening udp on {:?}", self.config.local_addr);
         UdpRelay::new(socket, cipher).await
     }
