@@ -1,17 +1,17 @@
+use std::convert::TryFrom;
 use std::io;
 
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::{aead::AeadInPlace, Nonce};
+use aes_gcm::aead::{AeadInOut, Nonce};
 use base64::Engine;
 use camellia::{Camellia128, Camellia192, Camellia256};
 use cipher::{
+    array::Array,
     consts::{U12, U8},
-    generic_array::GenericArray,
-    BlockCipher, BlockEncryptMut, Key, KeyInit, KeyIvInit, StreamCipher,
+    BlockCipherEncrypt, Key, KeyInit, KeyIvInit, StreamCipher,
 };
 use ctr::Ctr128BE;
 
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::util::{derive_blake3_subkey, generate_key, hkdf_sha1};
@@ -27,7 +27,7 @@ trait CipherCore {
 }
 
 /// CFB mode cipher.
-struct Cfb<C: BlockCipher + BlockEncryptMut> {
+struct Cfb<C: BlockCipherEncrypt> {
     enc: cfb_mode::BufEncryptor<C>,
     dec: cfb_mode::BufDecryptor<C>,
 }
@@ -71,8 +71,10 @@ macro_rules! impl_cfb {
     ($name:ident, $cipher:ty) => {
         impl $name {
             fn new(key: &[u8], iv: &[u8]) -> $name {
-                let enc = cfb_mode::BufEncryptor::<$cipher>::new(key.into(), iv.into());
-                let dec = cfb_mode::BufDecryptor::<$cipher>::new(key.into(), iv.into());
+                let enc = cfb_mode::BufEncryptor::<$cipher>::new_from_slices(key, iv)
+                    .expect("invalid CFB key/iv length");
+                let dec = cfb_mode::BufDecryptor::<$cipher>::new_from_slices(key, iv)
+                    .expect("invalid CFB key/iv length");
                 $name { enc, dec }
             }
         }
@@ -167,7 +169,7 @@ impl CipherCore for Salsa20 {
 
 struct AesGcm<G>
 where
-    G: AeadInPlace + KeyInit,
+    G: AeadInOut + KeyInit,
 {
     inner: G,
     nonce: Vec<u8>,
@@ -197,8 +199,8 @@ macro_rules! impl_aead_methods {
             let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
             let mut buffer = plaintext_slice.to_vec();
 
-            let nonce = $make_nonce(&self.nonce);
-            match self.inner.encrypt_in_place(nonce, &[], &mut buffer) {
+            let nonce = $make_nonce(self.nonce.as_slice());
+            match self.inner.encrypt_in_place(&nonce, &[], &mut buffer) {
                 Ok(()) => {
                     if buffer.len() == plaintext_len + 16 {
                         plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
@@ -226,8 +228,8 @@ macro_rules! impl_aead_methods {
             }
             let mut buffer = data.to_vec();
 
-            let nonce = $make_nonce(&self.nonce);
-            match self.inner.decrypt_in_place(nonce, &[], &mut buffer) {
+            let nonce = $make_nonce(self.nonce.as_slice());
+            match self.inner.decrypt_in_place(&nonce, &[], &mut buffer) {
                 Ok(()) => {
                     let plaintext_len = buffer.len();
                     if plaintext_len <= data.len() {
@@ -251,16 +253,16 @@ macro_rules! impl_aead_methods {
 
 impl<G> AesGcm<G>
 where
-    G: AeadInPlace + KeyInit,
+    G: AeadInOut + KeyInit,
 {
     fn new(key: &[u8], salt: &[u8]) -> AesGcm<G> {
         // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
         hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
             .expect("HKDF-SHA1 key derivation failed");
-        let key = Key::<G>::from_slice(&subkey);
+        let key = Key::<G>::try_from(subkey.as_slice()).expect("invalid AEAD key length");
         AesGcm {
-            inner: G::new(key),
+            inner: G::new(&key),
             nonce: vec![0u8; 12],
         }
     }
@@ -268,9 +270,9 @@ where
 
 impl<G> CipherCore for AesGcm<G>
 where
-    G: AeadInPlace + KeyInit + Send + Sync + 'static,
+    G: AeadInOut + KeyInit + Send + Sync + 'static,
 {
-    impl_aead_methods!(Nonce::from_slice);
+    impl_aead_methods!(|n| Nonce::<G>::try_from(n).expect("invalid nonce length"));
 }
 
 struct Blake3Aes128Gcm {
@@ -281,16 +283,16 @@ struct Blake3Aes128Gcm {
 impl Blake3Aes128Gcm {
     fn new(key: &[u8], salt: &[u8]) -> Blake3Aes128Gcm {
         let subkey = derive_blake3_subkey(key, salt);
-        let key = Key::<aes_gcm::Aes128Gcm>::from_slice(&subkey[..16]);
+        let key = Key::<aes_gcm::Aes128Gcm>::try_from(&subkey[..16]).expect("invalid key length");
         Blake3Aes128Gcm {
-            inner: aes_gcm::Aes128Gcm::new(key),
+            inner: aes_gcm::Aes128Gcm::new(&key),
             nonce: vec![0u8; 12],
         }
     }
 }
 
 impl CipherCore for Blake3Aes128Gcm {
-    impl_aead_methods!(Nonce::from_slice);
+    impl_aead_methods!(|n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"));
 }
 
 struct Blake3Aes256Gcm {
@@ -301,16 +303,16 @@ struct Blake3Aes256Gcm {
 impl Blake3Aes256Gcm {
     fn new(key: &[u8], salt: &[u8]) -> Blake3Aes256Gcm {
         let subkey = derive_blake3_subkey(key, salt);
-        let key = Key::<aes_gcm::Aes256Gcm>::from_slice(&subkey[..32]);
+        let key = Key::<aes_gcm::Aes256Gcm>::try_from(&subkey[..32]).expect("invalid key length");
         Blake3Aes256Gcm {
-            inner: aes_gcm::Aes256Gcm::new(key),
+            inner: aes_gcm::Aes256Gcm::new(&key),
             nonce: vec![0u8; 12],
         }
     }
 }
 
 impl CipherCore for Blake3Aes256Gcm {
-    impl_aead_methods!(Nonce::from_slice);
+    impl_aead_methods!(|n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"));
 }
 
 struct Blake3ChaCha20Poly1305 {
@@ -321,16 +323,16 @@ struct Blake3ChaCha20Poly1305 {
 impl Blake3ChaCha20Poly1305 {
     fn new(key: &[u8], salt: &[u8]) -> Blake3ChaCha20Poly1305 {
         let subkey = derive_blake3_subkey(key, salt);
-        let key = chacha20poly1305::Key::from_slice(&subkey[..32]);
+        let key = chacha20poly1305::Key::try_from(&subkey[..32]).expect("invalid key length");
         Blake3ChaCha20Poly1305 {
-            inner: chacha20poly1305::XChaCha20Poly1305::new(key),
+            inner: chacha20poly1305::XChaCha20Poly1305::new(&key),
             nonce: vec![0u8; 24],
         }
     }
 }
 
 impl CipherCore for Blake3ChaCha20Poly1305 {
-    impl_aead_methods!(chacha20poly1305::XNonce::from_slice);
+    impl_aead_methods!(|n| chacha20poly1305::XNonce::try_from(n).expect("invalid nonce length"));
 }
 
 struct ChaCha20IetfPoly1305 {
@@ -349,16 +351,16 @@ impl ChaCha20Poly1305 {
         let mut subkey = vec![0u8; key.len()];
         hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
             .expect("HKDF-SHA1 key derivation failed");
-        let key = chacha20poly1305::Key::from_slice(&subkey);
+        let key = chacha20poly1305::Key::try_from(subkey.as_slice()).expect("invalid key length");
         ChaCha20Poly1305 {
-            inner: chacha20poly1305::ChaChaPoly1305::<ChaCha20, U8>::new(key),
+            inner: chacha20poly1305::ChaChaPoly1305::<ChaCha20, U8>::new(&key),
             nonce: vec![0u8; 8],
         }
     }
 }
 
 impl CipherCore for ChaCha20Poly1305 {
-    impl_aead_methods!(GenericArray::<u8, U8>::from_slice);
+    impl_aead_methods!(|n| Array::<u8, U8>::try_from(n).expect("invalid nonce length"));
 }
 
 impl ChaCha20IetfPoly1305 {
@@ -367,16 +369,16 @@ impl ChaCha20IetfPoly1305 {
         let mut subkey = vec![0u8; key.len()];
         hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
             .expect("HKDF-SHA1 key derivation failed");
-        let key = chacha20poly1305::Key::from_slice(&subkey);
+        let key = chacha20poly1305::Key::try_from(subkey.as_slice()).expect("invalid key length");
         ChaCha20IetfPoly1305 {
-            inner: chacha20poly1305::ChaCha20Poly1305::new(key),
+            inner: chacha20poly1305::ChaCha20Poly1305::new(&key),
             nonce: vec![0u8; 12],
         }
     }
 }
 
 impl CipherCore for ChaCha20IetfPoly1305 {
-    impl_aead_methods!(chacha20poly1305::Nonce::from_slice);
+    impl_aead_methods!(|n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"));
 }
 
 struct XChaCha20IetfPoly1305 {
@@ -389,16 +391,16 @@ impl XChaCha20IetfPoly1305 {
         // Use HKDF-SHA1 to derive subkey from key and salt
         let mut subkey = vec![0u8; key.len()];
         hkdf_sha1(key, salt, b"ss-subkey", &mut subkey).expect("HKDF-SHA1 key derivation failed");
-        let key = chacha20poly1305::Key::from_slice(&subkey);
+        let key = chacha20poly1305::Key::try_from(subkey.as_slice()).expect("invalid key length");
         XChaCha20IetfPoly1305 {
-            inner: chacha20poly1305::XChaCha20Poly1305::new(key),
+            inner: chacha20poly1305::XChaCha20Poly1305::new(&key),
             nonce: vec![0u8; 24],
         }
     }
 }
 
 impl CipherCore for XChaCha20IetfPoly1305 {
-    impl_aead_methods!(chacha20poly1305::XNonce::from_slice);
+    impl_aead_methods!(|n| chacha20poly1305::XNonce::try_from(n).expect("invalid nonce length"));
 }
 
 pub struct Cipher {
@@ -580,12 +582,24 @@ impl Cipher {
             Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, iv_or_salt)),
             Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, iv_or_salt)),
             Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, iv_or_salt)),
-            Method::Aes128Ctr => Box::new(Aes128Ctr::new(key.into(), iv_or_salt.into())),
-            Method::Aes192Ctr => Box::new(Aes192Ctr::new(key.into(), iv_or_salt.into())),
-            Method::Aes256Ctr => Box::new(Aes256Ctr::new(key.into(), iv_or_salt.into())),
-            Method::ChaCha20 => Box::new(ChaCha20::new(key.into(), iv_or_salt.into())),
-            Method::ChaCha20Ietf => Box::new(ChaCha20Ietf::new(key.into(), iv_or_salt.into())),
-            Method::Salsa20 => Box::new(Salsa20::new(key.into(), iv_or_salt.into())),
+            Method::Aes128Ctr => Box::new(
+                Aes128Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"),
+            ),
+            Method::Aes192Ctr => Box::new(
+                Aes192Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"),
+            ),
+            Method::Aes256Ctr => Box::new(
+                Aes256Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"),
+            ),
+            Method::ChaCha20 => Box::new(
+                ChaCha20::new_from_slices(key, iv_or_salt).expect("invalid ChaCha20 key/iv"),
+            ),
+            Method::ChaCha20Ietf => Box::new(
+                ChaCha20Ietf::new_from_slices(key, iv_or_salt).expect("invalid ChaCha20 key/iv"),
+            ),
+            Method::Salsa20 => Box::new(
+                Salsa20::new_from_slices(key, iv_or_salt).expect("invalid Salsa20 key/iv"),
+            ),
             Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, iv_or_salt)),
             Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, iv_or_salt)),
             Method::Blake3ChaCha20Poly1305 => {
@@ -655,10 +669,10 @@ impl Cipher {
     #[must_use]
     pub fn reset(&self) -> Cipher {
         let mut encrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
-        rand::rng().fill(&mut encrypt_iv_or_salt[..]);
+        rand::fill(&mut encrypt_iv_or_salt[..]);
         let decrypt_iv_or_salt = if self.is_aead2022() {
             let mut decrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
-            rand::rng().fill(&mut decrypt_iv_or_salt[..]);
+            rand::fill(&mut decrypt_iv_or_salt[..]);
             decrypt_iv_or_salt
         } else {
             self.encrypt_iv_or_salt.clone()
