@@ -582,24 +582,24 @@ impl Cipher {
             Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, iv_or_salt)),
             Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, iv_or_salt)),
             Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, iv_or_salt)),
-            Method::Aes128Ctr => Box::new(
-                Aes128Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"),
-            ),
-            Method::Aes192Ctr => Box::new(
-                Aes192Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"),
-            ),
-            Method::Aes256Ctr => Box::new(
-                Aes256Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"),
-            ),
+            Method::Aes128Ctr => {
+                Box::new(Aes128Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"))
+            }
+            Method::Aes192Ctr => {
+                Box::new(Aes192Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"))
+            }
+            Method::Aes256Ctr => {
+                Box::new(Aes256Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"))
+            }
             Method::ChaCha20 => Box::new(
                 ChaCha20::new_from_slices(key, iv_or_salt).expect("invalid ChaCha20 key/iv"),
             ),
             Method::ChaCha20Ietf => Box::new(
                 ChaCha20Ietf::new_from_slices(key, iv_or_salt).expect("invalid ChaCha20 key/iv"),
             ),
-            Method::Salsa20 => Box::new(
-                Salsa20::new_from_slices(key, iv_or_salt).expect("invalid Salsa20 key/iv"),
-            ),
+            Method::Salsa20 => {
+                Box::new(Salsa20::new_from_slices(key, iv_or_salt).expect("invalid Salsa20 key/iv"))
+            }
             Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, iv_or_salt)),
             Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, iv_or_salt)),
             Method::Blake3ChaCha20Poly1305 => {
