@@ -643,6 +643,16 @@ impl Cipher {
         is_aead2022(&self.method)
     }
 
+    /// Cipher method.
+    pub fn method(&self) -> Method {
+        self.method
+    }
+
+    /// Pre-shared key (already decoded from base64 for the 2022 methods).
+    pub fn key(&self) -> &[u8] {
+        &self.key
+    }
+
     /// Encrypt data in place.
     pub fn encrypt_in_place(&mut self, input: &mut [u8]) -> io::Result<()> {
         if let Some(enc) = &mut self.encrypt {

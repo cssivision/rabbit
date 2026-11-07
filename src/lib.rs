@@ -8,6 +8,7 @@ pub mod redir;
 pub mod resolver;
 pub mod server;
 pub mod socks5;
+pub mod udp2022;
 pub mod util;
 
 use std::io;
