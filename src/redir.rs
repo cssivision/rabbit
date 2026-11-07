@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
@@ -18,12 +20,89 @@ use crate::cipher::Cipher;
 use crate::config::{self, Network};
 use crate::listener;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
+use crate::udp2022::{PacketWindow, Udp2022};
 use crate::util::generate_raw_addr;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_UDP_BUFFER_SIZE: usize = 65536;
+/// How long an AEAD-2022 UDP association is remembered per local peer.
+const DEFAULT_UDP2022_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Client-side state of the AEAD-2022 UDP association with one peer.
+struct Udp2022Association {
+    client_session_id: u64,
+    next_packet_id: u64,
+    server_session_id: u64,
+    window: PacketWindow,
+    last_seen: Instant,
+}
+
+struct Udp2022Sessions {
+    sessions: Mutex<HashMap<SocketAddr, Udp2022Association>>,
+}
+
+impl Udp2022Sessions {
+    fn new() -> Udp2022Sessions {
+        Udp2022Sessions {
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Reserve the packet id of the next outgoing packet.
+    fn next_packet_id(&self, peer_addr: SocketAddr) -> (u64, u64) {
+        let mut sessions = self.sessions.lock().unwrap();
+        let now = Instant::now();
+        sessions.retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
+
+        let session = sessions
+            .entry(peer_addr)
+            .or_insert_with(|| Udp2022Association {
+                client_session_id: random_session_id(),
+                next_packet_id: 1,
+                server_session_id: 0,
+                window: PacketWindow::new(),
+                last_seen: now,
+            });
+        session.last_seen = now;
+
+        let packet_id = session.next_packet_id;
+        session.next_packet_id = session.next_packet_id.wrapping_add(1);
+        (session.client_session_id, packet_id)
+    }
+
+    /// Validate a response packet from the server and remember the server
+    /// session id it uses.
+    fn accept_response(
+        &self,
+        peer_addr: SocketAddr,
+        packet_id: u64,
+        server_session_id: u64,
+    ) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.get_mut(&peer_addr) {
+            session.last_seen = Instant::now();
+            if session.server_session_id != 0 && session.server_session_id != server_session_id {
+                return false;
+            }
+            session.server_session_id = server_session_id;
+            return session.window.validate(packet_id);
+        }
+        false
+    }
+}
+
+fn random_session_id() -> u64 {
+    let mut buf = [0u8; 8];
+    rand::fill(&mut buf[..]);
+    let id = u64::from_be_bytes(buf);
+    if id == 0 {
+        1
+    } else {
+        id
+    }
+}
 
 pub struct Server {
     services: Vec<Service>,
@@ -107,6 +186,7 @@ impl Service {
             cipher,
             server_addr: self.config.server_addr,
             redir_addr: self.config.redir_addr,
+            sessions: Arc::new(Udp2022Sessions::new()),
         };
         udp_relay.await
     }
@@ -162,6 +242,7 @@ struct UdpRelay {
     cipher: Cipher,
     server_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
+    sessions: Arc<Udp2022Sessions>,
 }
 
 impl UdpRelay {
@@ -203,10 +284,18 @@ impl Future for UdpRelay {
                     let sender = me.sender.clone();
                     let server_addr = me.server_addr;
                     let redir_addr = me.redir_addr;
+                    let sessions = Arc::clone(&me.sessions);
                     awak::spawn(async move {
-                        if let Err(e) =
-                            proxy_packet(server_addr, cipher, buf, peer_addr, redir_addr, sender)
-                                .await
+                        if let Err(e) = proxy_packet(
+                            server_addr,
+                            cipher,
+                            buf,
+                            peer_addr,
+                            redir_addr,
+                            sender,
+                            sessions,
+                        )
+                        .await
                         {
                             log::error!("failed to proxy; error={}", e);
                         };
@@ -225,12 +314,25 @@ async fn proxy_packet(
     peer_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
     mut sender: Sender<(Vec<u8>, SocketAddr)>,
+    sessions: Arc<Udp2022Sessions>,
 ) -> io::Result<(u64, u64)> {
     let redir_addr = if let Some(redir_addr) = redir_addr {
         redir_addr
     } else {
         unimplemented!()
     };
+    if cipher.is_aead2022() {
+        return proxy_packet_2022(
+            server_addr,
+            cipher,
+            buf,
+            redir_addr,
+            peer_addr,
+            sender,
+            sessions,
+        )
+        .await;
+    }
     cipher.init_encrypt();
     let mut data = cipher.encrypt_iv_or_salt().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
@@ -276,6 +378,58 @@ async fn proxy_packet(
     }
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
+        .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
+    Ok((buf.len() as u64, n as u64))
+}
+
+/// Relay a single AEAD-2022 (SIP022) UDP datagram to the server.
+async fn proxy_packet_2022(
+    server_addr: SocketAddr,
+    cipher: Cipher,
+    buf: Vec<u8>,
+    redir_addr: SocketAddr,
+    peer_addr: SocketAddr,
+    mut sender: Sender<(Vec<u8>, SocketAddr)>,
+    sessions: Arc<Udp2022Sessions>,
+) -> io::Result<(u64, u64)> {
+    let udp = Udp2022::new(cipher.method(), cipher.key())?;
+    let (client_session_id, packet_id) = sessions.next_packet_id(peer_addr);
+    let data = udp.encrypt_client_packet(
+        client_session_id,
+        packet_id,
+        &redir_addr.ip().to_string(),
+        redir_addr.port(),
+        &buf,
+    )?;
+
+    // send to and recv from target.
+    let local: SocketAddr = ([0u8; 4], 0).into();
+    let socket = UdpSocket::bind(local)?;
+    socket.connect(server_addr)?;
+    let _ = socket.send(&data).await?;
+    let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
+    let n = socket.recv(&mut recv_buf).await?;
+    recv_buf.truncate(n);
+
+    let response = udp.decrypt_server_packet(&recv_buf)?;
+    if response.client_session_id != client_session_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "2022 udp response belongs to another session",
+        ));
+    }
+    if !sessions.accept_response(peer_addr, response.packet_id, response.server_session_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "replayed 2022 udp response, packet id {}",
+                response.packet_id
+            ),
+        ));
+    }
+
+    sender
+        .try_send((response.payload, peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
