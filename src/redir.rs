@@ -17,6 +17,7 @@ use socket2::SockAddr;
 use crate::cipher::Cipher;
 use crate::config::{self, Network};
 use crate::listener;
+use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::util::generate_raw_addr;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
@@ -246,8 +247,33 @@ async fn proxy_packet(
     let n = socket.recv(&mut recv_buf).await?;
     recv_buf.truncate(n);
 
+    // The server prefixes each UDP response with its own salt/IV.
+    let salt_len = cipher.iv_or_salt_len();
+    if n < salt_len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "udp response shorter than salt",
+        ));
+    }
+    cipher
+        .decrypt_iv_or_salt_mut()
+        .copy_from_slice(&recv_buf[..salt_len]);
     cipher.init_decrypt();
+    recv_buf.drain(..salt_len);
     cipher.decrypt_in_place(&mut recv_buf)?;
+
+    // Strip the SOCKS5 address prefix that the server's response body starts with.
+    if let Some(atyp) = recv_buf.first().copied() {
+        let skip = match atyp {
+            TYPE_IPV4 => 1 + 4 + 2,
+            TYPE_IPV6 => 1 + 16 + 2,
+            TYPE_DOMAIN => 2 + recv_buf.get(1).copied().unwrap_or(0) as usize + 2,
+            _ => 0,
+        };
+        if skip > 0 && recv_buf.len() >= skip {
+            recv_buf.drain(..skip);
+        }
+    }
     sender
         .try_send((recv_buf.to_vec(), peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;

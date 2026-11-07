@@ -24,7 +24,6 @@ use cipher::Cipher;
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 pub const DEFAULT_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 
-const PAYLOAD_SIZE_MASK: usize = 0x3fff;
 const MAX_PAYLOAD_SIZE: usize = 0xffff;
 const MAX_MESSAGE_AGE_SECONDS: u64 = 30;
 
@@ -78,6 +77,8 @@ struct Writer {
     read_done: bool,
     /// AEAD writer for writing encrypted data
     aead: Option<AeadWriter>,
+    /// IV/salt that still has to be prepended to the next encrypted chunk
+    salt: BytesMut,
 }
 
 enum ServerType {
@@ -134,6 +135,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 pos: 0,
                 cap: 0,
                 read_done: false,
+                salt: BytesMut::new(),
                 aead: if is_aead {
                     Some(AeadWriter {
                         tag_size,
@@ -362,8 +364,7 @@ impl AeadReader {
                     }
                     let mut cipher = cipher.lock().unwrap();
                     cipher.decrypt_in_place(&mut self.buf[..length_size])?;
-                    let payload_size =
-                        u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize & PAYLOAD_SIZE_MASK;
+                    let payload_size = u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize;
                     self.pos = 0;
                     self.state = AeadReaderState::Payload(payload_size);
                 }
@@ -466,10 +467,14 @@ where
             cipher.init_encrypt();
             writer.inited = true;
 
+            // Keep the salt pending: it must be written in the same write as the
+            // first encrypted chunk, because clients such as shadowsocks-rust read
+            // the whole header chunk (salt included) with a single read call.
             let n = cipher.iv_or_salt_len();
-            writer.cap = n;
-            writer.buf.resize(n, 0u8);
-            writer.buf[..n].copy_from_slice(cipher.encrypt_iv_or_salt());
+            writer.salt.clear();
+            writer
+                .salt
+                .extend_from_slice(&cipher.encrypt_iv_or_salt()[..n]);
         }
 
         loop {
@@ -494,7 +499,7 @@ where
             }
 
             let mut cipher = me.cipher.lock().unwrap();
-            let data = if let Some(aead) = writer.aead.as_mut() {
+            let mut data = if let Some(aead) = writer.aead.as_mut() {
                 // AEAD: encrypt payload with format [encrypted length][length tag][encrypted payload][payload tag]
                 aead.encrypt_payload(buf, &mut cipher)?
             } else {
@@ -503,6 +508,13 @@ where
                 cipher.encrypt_in_place(&mut data)?;
                 data
             };
+            if !writer.salt.is_empty() {
+                let mut with_salt = BytesMut::with_capacity(writer.salt.len() + data.len());
+                with_salt.extend_from_slice(&writer.salt);
+                with_salt.extend_from_slice(&data);
+                writer.salt.clear();
+                data = with_salt;
+            }
             writer.pos = 0;
             writer.cap = data.len();
             writer.buf = data;

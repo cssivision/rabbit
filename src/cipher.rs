@@ -316,7 +316,7 @@ impl CipherCore for Blake3Aes256Gcm {
 }
 
 struct Blake3ChaCha20Poly1305 {
-    inner: chacha20poly1305::XChaCha20Poly1305,
+    inner: chacha20poly1305::ChaCha20Poly1305,
     nonce: Vec<u8>,
 }
 
@@ -325,14 +325,14 @@ impl Blake3ChaCha20Poly1305 {
         let subkey = derive_blake3_subkey(key, salt);
         let key = chacha20poly1305::Key::try_from(&subkey[..32]).expect("invalid key length");
         Blake3ChaCha20Poly1305 {
-            inner: chacha20poly1305::XChaCha20Poly1305::new(&key),
-            nonce: vec![0u8; 24],
+            inner: chacha20poly1305::ChaCha20Poly1305::new(&key),
+            nonce: vec![0u8; 12],
         }
     }
 }
 
 impl CipherCore for Blake3ChaCha20Poly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::XNonce::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(|n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"));
 }
 
 struct ChaCha20IetfPoly1305 {
@@ -482,8 +482,8 @@ impl Cipher {
             Method::Aes128Ctr => (16, 16),
             Method::Aes192Ctr => (24, 16),
             Method::Aes256Ctr => (32, 16),
-            Method::ChaCha20 => (32, 16),
-            Method::ChaCha20Ietf => (32, 16),
+            Method::ChaCha20 => (32, 8),
+            Method::ChaCha20Ietf => (32, 12),
             Method::Salsa20 => (32, 8),
             Method::Blake3Aes128Gcm => (16, 16),
             Method::Blake3Aes256Gcm => (32, 32),
@@ -525,10 +525,6 @@ impl Cipher {
 
     /// Initialize the encryption cipher.
     pub fn init_encrypt(&mut self) {
-        if !self.is_aead2022() {
-            self.encrypt_iv_or_salt
-                .copy_from_slice(&self.decrypt_iv_or_salt);
-        }
         self.encrypt = Some(self.gen(&self.encrypt_iv_or_salt));
     }
 
@@ -670,13 +666,12 @@ impl Cipher {
     pub fn reset(&self) -> Cipher {
         let mut encrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
         rand::fill(&mut encrypt_iv_or_salt[..]);
-        let decrypt_iv_or_salt = if self.is_aead2022() {
-            let mut decrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
-            rand::fill(&mut decrypt_iv_or_salt[..]);
-            decrypt_iv_or_salt
-        } else {
-            self.encrypt_iv_or_salt.clone()
-        };
+        // Never seed the decrypt IV/salt from the *old* `encrypt_iv_or_salt`
+        // (all zeros for a freshly built cipher): that silently made every UDP
+        // packet use an all-zero salt. The real value comes from the wire frame
+        // (`CipherStream`) or from the UDP datagram header.
+        let mut decrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
+        rand::fill(&mut decrypt_iv_or_salt[..]);
 
         Cipher {
             key: self.key.clone(),

@@ -18,6 +18,7 @@ use crate::config::{self, Addr, Network};
 use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
+use crate::util::generate_raw_addr;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
@@ -221,14 +222,20 @@ async fn proxy_packet(
     recv_buf.truncate(n);
 
     // encrypt return data.
+    // A UDP datagram is self-contained: there is no stream handshake that could
+    // carry the salt, so every response is prefixed with a fresh salt/IV.
     cipher.init_encrypt();
+    let salt_len = cipher.iv_or_salt_len();
+    let mut data = cipher.encrypt_iv_or_salt().to_vec();
+    data.extend_from_slice(&generate_raw_addr(&addr.to_string(), port));
+    data.extend_from_slice(&recv_buf);
     if cipher.is_aead() {
-        recv_buf.extend_from_slice(&vec![0u8; cipher.tag_size()]);
+        data.extend_from_slice(&vec![0u8; cipher.tag_size()]);
     }
-    cipher.encrypt_in_place(&mut recv_buf)?;
+    cipher.encrypt_in_place(&mut data[salt_len..])?;
 
     sender
-        .try_send((recv_buf, peer_addr))
+        .try_send((data, peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
