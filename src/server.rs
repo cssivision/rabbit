@@ -10,18 +10,18 @@ use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
-use awak::util::IdleTimeout;
+use awak::util::{copy_bidirectional_with_buffer_size, IdleTimeout};
 use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream, StreamExt};
 
 use crate::cipher::Cipher;
 use crate::config::{self, Addr, Transport};
-use crate::copy::copy_bidirectional;
 use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::udp2022::{PacketWindow, Udp2022};
 use crate::udp_legacy;
+use crate::util::COPY_BUFFER_SIZE;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
@@ -617,7 +617,7 @@ where
     log::debug!("connected to addr {}:{}", addr, port);
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional(&mut socket2, socket1),
+        copy_bidirectional_with_buffer_size(&mut socket2, socket1, COPY_BUFFER_SIZE),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )

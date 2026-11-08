@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
-use awak::util::IdleTimeout;
+use awak::util::{copy_bidirectional_with_buffer_size, IdleTimeout};
 use bytes::BytesMut;
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
@@ -18,11 +18,10 @@ use socket2::SockAddr;
 
 use crate::cipher::Cipher;
 use crate::config::{self, Transport};
-use crate::copy::copy_bidirectional;
 use crate::listener;
 use crate::udp2022::{PacketWindow, Udp2022};
 use crate::udp_legacy;
-use crate::util::generate_raw_addr;
+use crate::util::{generate_raw_addr, COPY_BUFFER_SIZE};
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
@@ -461,7 +460,7 @@ where
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional(socket1, &mut socket2),
+        copy_bidirectional_with_buffer_size(socket1, &mut socket2, COPY_BUFFER_SIZE),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )

@@ -1,7 +1,6 @@
 pub mod args;
 pub mod cipher;
 pub mod config;
-pub mod copy;
 pub mod listener;
 pub mod local;
 #[cfg(target_os = "linux")]
