@@ -317,7 +317,6 @@ impl AeadReader {
                         StreamType::Request => 11 + self.tag_size,
                         StreamType::Response => 11 + self.seed_size + self.tag_size,
                     };
-                    buf.clear();
                     let n = ready!(poll_read_exact(&mut stream, cx, buf, header_size))?;
                     if n < header_size {
                         return Poll::Ready(Ok(0));
@@ -328,11 +327,11 @@ impl AeadReader {
                         &buf[..header_size - self.tag_size],
                         cipher.encrypt_seed().as_bytes(),
                     )?;
+                    buf.clear();
                     self.state = AeadReaderState::Payload(size);
                 }
                 AeadReaderState::Length => {
                     let length_size = 2 + self.tag_size;
-                    buf.clear();
                     let n = ready!(poll_read_exact(&mut stream, cx, buf, length_size))?;
                     if n < length_size {
                         return Poll::Ready(Ok(0));
@@ -346,11 +345,11 @@ impl AeadReader {
                             "payload size is too large",
                         )));
                     }
+                    buf.clear();
                     self.state = AeadReaderState::Payload(size);
                 }
                 AeadReaderState::Payload(size) => {
                     let record_size = size + self.tag_size;
-                    buf.clear();
                     let n = ready!(poll_read_exact(&mut stream, cx, buf, record_size))?;
                     if n < record_size {
                         return Poll::Ready(Ok(0));
@@ -404,15 +403,14 @@ fn poll_read_exact<A>(
 where
     A: AsyncRead + Unpin + ?Sized,
 {
-    let mut read = 0;
-    while read < len {
-        let n = ready!(poll_read_uninit(stream, cx, buf, len - read))?;
+    while buf.len() < len {
+        let want = len - buf.len();
+        let n = ready!(poll_read_uninit(stream, cx, buf, want))?;
         if n == 0 {
             break;
         }
-        read += n;
     }
-    Poll::Ready(Ok(read))
+    Poll::Ready(Ok(buf.len()))
 }
 
 impl<A> AsyncRead for CipherStream<'_, A>
@@ -456,6 +454,11 @@ where
                 let n = std::cmp::min(buf.len(), reader.cap - reader.pos);
                 buf[..n].copy_from_slice(&reader.buf[reader.pos..reader.pos + n]);
                 reader.pos += n;
+                if reader.pos == reader.cap {
+                    reader.buf.clear();
+                    reader.pos = 0;
+                    reader.cap = 0;
+                }
                 return Poll::Ready(Ok(n));
             }
             let Reader {
