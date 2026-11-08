@@ -29,8 +29,26 @@ pub fn bind_tcp(addr: SocketAddr) -> io::Result<TcpListener> {
     TcpListener::from_std(socket.into())
 }
 
+/// Outbound/inbound socket buffer for UDP relays. A relay handles bursts of
+/// datagrams, so the default (~200 KiB) buffer drops far too easily.
+pub const UDP_SOCKET_BUFFER: usize = 4 << 20;
+
+/// Give a UDP socket room for bursts; failures are not fatal because the
+/// kernel may cap the value.
+pub fn tune_udp_socket(socket: &UdpSocket) {
+    use std::os::unix::io::{AsRawFd, BorrowedFd};
+
+    // SAFETY: the descriptor stays open for as long as `socket` is borrowed.
+    let fd = unsafe { BorrowedFd::borrow_raw(socket.as_raw_fd()) };
+    let sock = socket2::SockRef::from(&fd);
+    let _ = sock.set_recv_buffer_size(UDP_SOCKET_BUFFER);
+    let _ = sock.set_send_buffer_size(UDP_SOCKET_BUFFER);
+}
+
 pub fn bind_udp(addr: SocketAddr) -> io::Result<UdpSocket> {
     let socket = bind_socket(addr, Type::DGRAM, Protocol::UDP)?;
+    let _ = socket.set_recv_buffer_size(UDP_SOCKET_BUFFER);
+    let _ = socket.set_send_buffer_size(UDP_SOCKET_BUFFER);
     UdpSocket::from_std(socket.into())
 }
 

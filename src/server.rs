@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
 use awak::util::{copy_bidirectional, IdleTimeout};
-use futures_channel::mpsc::{channel, Receiver, Sender};
-use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream};
+use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream, StreamExt};
 
 use crate::cipher::Cipher;
 use crate::config::{self, Addr, Transport};
@@ -32,6 +32,9 @@ const MAX_UDP_BUFFER_SIZE: usize = 65536;
 /// How long an AEAD-2022 UDP session (and its server session id / packet
 /// counter) is kept alive after the last packet.
 const DEFAULT_UDP2022_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long an idle outbound UDP flow keeps its socket.
+const DEFAULT_UDP_FLOW_TIMEOUT: Duration = Duration::from_secs(300);
+const DEFAULT_UDP_NAT_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Per client-session state for AEAD-2022 UDP.
 ///
@@ -188,19 +191,232 @@ impl Service {
     }
 }
 
+/// Key identifying one outbound flow: client address, destination and, for
+/// SIP022, the client session id.
+type UdpKey = (SocketAddr, String, u16, u64);
+
+struct UdpEntry {
+    sender: UnboundedSender<Vec<u8>>,
+    last_seen: Instant,
+}
+
+struct UdpNatState {
+    entries: HashMap<UdpKey, UdpEntry>,
+    last_sweep: Instant,
+}
+
+/// Reusable outbound sockets, one per client/destination flow.
+///
+/// Binding a socket and spawning a task for every datagram made the relay
+/// drop packets under load, so a flow is created once and then reused until
+/// it has been idle for `DEFAULT_UDP_FLOW_TIMEOUT`.
+struct UdpNat {
+    state: Mutex<UdpNatState>,
+}
+
+impl UdpNat {
+    fn new() -> UdpNat {
+        UdpNat {
+            state: Mutex::new(UdpNatState {
+                entries: HashMap::new(),
+                last_sweep: Instant::now(),
+            }),
+        }
+    }
+
+    /// Hand `payload` to the flow for `key`, creating the flow on first use.
+    fn dispatch(
+        &self,
+        key: UdpKey,
+        mut payload: Vec<u8>,
+        cipher: &Cipher,
+        sender: &UnboundedSender<(Vec<u8>, SocketAddr)>,
+        sessions: &Arc<Udp2022Sessions>,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        let now = Instant::now();
+        if now.duration_since(state.last_sweep) >= DEFAULT_UDP_NAT_SWEEP_INTERVAL {
+            state
+                .entries
+                .retain(|_, e| now.duration_since(e.last_seen) < DEFAULT_UDP_FLOW_TIMEOUT);
+            state.last_sweep = now;
+        }
+
+        if let Some(entry) = state.entries.get_mut(&key) {
+            entry.last_seen = now;
+            match entry.sender.unbounded_send(payload) {
+                Ok(()) => return,
+                Err(e) => {
+                    // The flow task is gone; drop the entry so the packet
+                    // below starts a fresh one.
+                    payload = e.into_inner();
+                }
+            }
+            state.entries.remove(&key);
+        }
+
+        let (tx, rx) = unbounded();
+        if tx.unbounded_send(payload).is_err() {
+            return;
+        }
+        state.entries.insert(
+            key.clone(),
+            UdpEntry {
+                sender: tx,
+                last_seen: now,
+            },
+        );
+        awak::spawn(udp_flow(
+            key,
+            rx,
+            cipher.reset(),
+            sender.clone(),
+            Arc::clone(sessions),
+        ))
+        .detach();
+    }
+}
+
+/// One outbound flow: forwards client payloads to the destination and relays
+/// the replies back through the relay's response channel.
+async fn udp_flow(
+    key: UdpKey,
+    mut packets: UnboundedReceiver<Vec<u8>>,
+    cipher: Cipher,
+    sender: UnboundedSender<(Vec<u8>, SocketAddr)>,
+    sessions: Arc<Udp2022Sessions>,
+) -> io::Result<()> {
+    let (client, host, port, client_session_id) = key.clone();
+    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
+    let local: SocketAddr = if addr.is_ipv4() {
+        ([0u8; 4], 0).into()
+    } else {
+        ([0u16; 8], 0).into()
+    };
+
+    let socket = Arc::new(UdpSocket::bind(local)?);
+    listener::tune_udp_socket(&socket);
+    socket.connect((addr, port))?;
+    log::debug!("udp flow {:?} -> {}:{}", client, host, port);
+
+    let replies = udp_reply_loop(
+        Arc::clone(&socket),
+        SocketAddr::new(addr, port),
+        client,
+        client_session_id,
+        cipher,
+        sender,
+        sessions,
+    );
+    let requests = udp_request_loop(socket, &mut packets);
+    let ((), ()) = join(replies, requests).await;
+    Ok(())
+}
+
+async fn udp_request_loop(socket: Arc<UdpSocket>, packets: &mut UnboundedReceiver<Vec<u8>>) {
+    while let Some(payload) = packets.next().await {
+        if let Err(e) = socket.send(&payload).await {
+            log::error!("udp flow send failed: {}", e);
+            return;
+        }
+    }
+}
+
+async fn udp_reply_loop(
+    socket: Arc<UdpSocket>,
+    target: SocketAddr,
+    client: SocketAddr,
+    client_session_id: u64,
+    cipher: Cipher,
+    sender: UnboundedSender<(Vec<u8>, SocketAddr)>,
+    sessions: Arc<Udp2022Sessions>,
+) {
+    let udp2022 = if cipher.is_aead2022() {
+        match Udp2022::new(cipher.method(), cipher.key()) {
+            Ok(udp) => Some(udp),
+            Err(e) => {
+                log::error!("udp flow: {}", e);
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
+    let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
+    loop {
+        let (n, src) =
+            match timeout(DEFAULT_UDP_FLOW_TIMEOUT, socket.recv_from(&mut recv_buf)).await {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => {
+                    log::error!("udp flow recv failed: {}", e);
+                    return;
+                }
+                Err(_) => {
+                    log::debug!("udp flow {:?} idle, closing", client);
+                    return;
+                }
+            };
+
+        let data = match &udp2022 {
+            Some(udp) => {
+                let (server_session_id, packet_id) = sessions.next(client_session_id);
+                match udp.encrypt_server_packet(
+                    server_session_id,
+                    packet_id,
+                    client_session_id,
+                    &src.ip().to_string(),
+                    src.port(),
+                    &recv_buf[..n],
+                ) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        log::error!("udp flow encrypt failed: {}", e);
+                        return;
+                    }
+                }
+            }
+            None => {
+                // A datagram is self-contained, so every reply carries its own
+                // fresh salt/IV and the destination address.
+                let mut cipher = cipher.reset();
+                cipher.init_encrypt();
+                let seed_len = cipher.seed_len();
+                let mut data = cipher.encrypt_seed().as_bytes().to_vec();
+                data.extend_from_slice(&generate_raw_addr(&target.ip().to_string(), target.port()));
+                data.extend_from_slice(&recv_buf[..n]);
+                if cipher.is_aead() {
+                    data.extend_from_slice(&vec![0u8; cipher.tag_size()]);
+                }
+                if let Err(e) = cipher.encrypt_in_place(&mut data[seed_len..]) {
+                    log::error!("udp flow encrypt failed: {}", e);
+                    return;
+                }
+                data
+            }
+        };
+
+        if sender.unbounded_send((data, client)).is_err() {
+            log::warn!("udp reply to {:?} dropped: relay closed", client);
+            return;
+        }
+    }
+}
+
 struct UdpRelay {
     buf: [u8; MAX_UDP_BUFFER_SIZE],
-    sender: Sender<(Vec<u8>, SocketAddr)>,
-    receiver: Receiver<(Vec<u8>, SocketAddr)>,
+    sender: UnboundedSender<(Vec<u8>, SocketAddr)>,
+    receiver: UnboundedReceiver<(Vec<u8>, SocketAddr)>,
     socket: UdpSocket,
     recv: Option<(Vec<u8>, SocketAddr)>,
     cipher: Cipher,
     sessions: Arc<Udp2022Sessions>,
+    nat: UdpNat,
 }
 
 impl UdpRelay {
     fn new(socket: UdpSocket, cipher: Cipher) -> UdpRelay {
-        let (sender, receiver) = channel(1024);
+        let (sender, receiver) = unbounded();
         UdpRelay {
             buf: [0u8; MAX_UDP_BUFFER_SIZE],
             sender,
@@ -209,6 +425,7 @@ impl UdpRelay {
             recv: None,
             cipher,
             sessions: Arc::new(Udp2022Sessions::new()),
+            nat: UdpNat::new(),
         }
     }
 
@@ -244,41 +461,39 @@ impl Future for UdpRelay {
                 Poll::Ready(v) => {
                     let (n, peer_addr) = v?;
                     log::info!("recv {} byte from {:?}", n, peer_addr);
-                    let mut buf = vec![0u8; n];
-                    buf.copy_from_slice(&me.buf[..n]);
-                    let cipher = me.cipher.reset();
-                    let sender = me.sender.clone();
-                    let sessions = Arc::clone(&me.sessions);
-                    awak::spawn(async move {
-                        if let Err(e) = proxy_packet(cipher, buf, peer_addr, sender, sessions).await
-                        {
-                            log::error!("failed to proxy; error={}", e);
-                        };
-                    })
-                    .detach();
+                    let mut buf = me.buf[..n].to_vec();
+                    let mut cipher = me.cipher.reset();
+                    let decoded = if cipher.is_aead2022() {
+                        decode_2022(&cipher, &buf, &me.sessions)
+                    } else {
+                        decode_legacy(&mut cipher, &mut buf)
+                    };
+                    match decoded {
+                        Ok((host, port, session, payload)) => {
+                            let key: UdpKey = (peer_addr, host, port, session);
+                            me.nat
+                                .dispatch(key, payload, &me.cipher, &me.sender, &me.sessions);
+                        }
+                        Err(e) => log::warn!("udp packet from {:?} dropped: {}", peer_addr, e),
+                    }
                 }
             }
         }
     }
 }
 
-async fn proxy_packet(
-    mut cipher: Cipher,
-    mut buf: Vec<u8>,
-    peer_addr: SocketAddr,
-    mut sender: Sender<(Vec<u8>, SocketAddr)>,
-    sessions: Arc<Udp2022Sessions>,
-) -> io::Result<(u64, u64)> {
-    if cipher.is_aead2022() {
-        return proxy_packet_2022(cipher, buf, peer_addr, sender, sessions).await;
-    }
-    if buf.len() < cipher.seed_len() {
+/// Decrypt a legacy (pre-SIP022) datagram and return its destination.
+fn decode_legacy(
+    cipher: &mut Cipher,
+    buf: &mut Vec<u8>,
+) -> io::Result<(String, u16, u64, Vec<u8>)> {
+    let seed_len = cipher.seed_len();
+    if buf.len() < seed_len {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "UnexpectedEof",
         ));
     }
-    let seed_len = cipher.seed_len();
     cipher
         .decrypt_seed_mut()
         .as_mut_bytes()
@@ -286,63 +501,31 @@ async fn proxy_packet(
     cipher.init_decrypt();
     buf.drain(..seed_len);
 
-    // decrypt recv data.
-    cipher.decrypt_in_place(&mut buf)?;
+    cipher.decrypt_in_place(buf)?;
     if cipher.is_aead() {
-        buf.drain(buf.len() - cipher.tag_size()..);
+        let tag = cipher.tag_size();
+        if buf.len() < tag {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "truncated tag",
+            ));
+        }
+        buf.truncate(buf.len() - tag);
     }
 
-    // get host and port.
-    let (n, host, port) = get_addr_info(&mut buf.as_slice()).await?;
-    log::debug!("proxy to address: {}:{}", host, port);
+    let (n, host, port) = parse_socks_addr(buf)?;
     buf.drain(..n);
-
-    // resolver host if need.
-    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&host)).await??;
-    log::debug!("resolver addr to ip: {}", addr);
-    let local: SocketAddr = if addr.is_ipv4() {
-        ([0u8; 4], 0).into()
-    } else {
-        ([0u16; 8], 0).into()
-    };
-
-    // send to and recv from target.
-    let socket = UdpSocket::bind(local)?;
-    socket.connect((addr, port))?;
-    let _ = socket.send(&buf).await?;
-    let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
-    let n = socket.recv(&mut recv_buf).await?;
-    recv_buf.truncate(n);
-
-    // encrypt return data.
-    // A UDP datagram is self-contained: there is no stream handshake that could
-    // carry the salt, so every response is prefixed with a fresh salt/IV.
-    cipher.init_encrypt();
-    let seed_len = cipher.seed_len();
-    let mut data = cipher.encrypt_seed().as_bytes().to_vec();
-    data.extend_from_slice(&generate_raw_addr(&addr.to_string(), port));
-    data.extend_from_slice(&recv_buf);
-    if cipher.is_aead() {
-        data.extend_from_slice(&vec![0u8; cipher.tag_size()]);
-    }
-    cipher.encrypt_in_place(&mut data[seed_len..])?;
-
-    sender
-        .try_send((data, peer_addr))
-        .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
-    Ok((buf.len() as u64, n as u64))
+    Ok((host, port, 0, std::mem::take(buf)))
 }
 
-/// Relay a single AEAD-2022 (SIP022) UDP datagram.
-async fn proxy_packet_2022(
-    cipher: Cipher,
-    buf: Vec<u8>,
-    peer_addr: SocketAddr,
-    mut sender: Sender<(Vec<u8>, SocketAddr)>,
-    sessions: Arc<Udp2022Sessions>,
-) -> io::Result<(u64, u64)> {
+/// Decrypt a SIP022 datagram and check its packet id for replays.
+fn decode_2022(
+    cipher: &Cipher,
+    buf: &[u8],
+    sessions: &Udp2022Sessions,
+) -> io::Result<(String, u16, u64, Vec<u8>)> {
     let udp = Udp2022::new(cipher.method(), cipher.key())?;
-    let request = udp.decrypt_client_packet(&buf)?;
+    let request = udp.decrypt_client_packet(buf)?;
     if !sessions.accept(request.client_session_id, request.packet_id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -359,35 +542,12 @@ async fn proxy_packet_2022(
         request.host,
         request.port
     );
-
-    let addr = timeout(DEFAULT_RESLOVE_TIMEOUT, resolve(&request.host)).await??;
-    let local: SocketAddr = if addr.is_ipv4() {
-        ([0u8; 4], 0).into()
-    } else {
-        ([0u16; 8], 0).into()
-    };
-
-    let socket = UdpSocket::bind(local)?;
-    let _ = socket
-        .send_to(&request.payload, (addr, request.port))
-        .await?;
-    let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
-    let (n, src) = socket.recv_from(&mut recv_buf).await?;
-
-    let (server_session_id, packet_id) = sessions.next(request.client_session_id);
-    let data = udp.encrypt_server_packet(
-        server_session_id,
-        packet_id,
+    Ok((
+        request.host,
+        request.port,
         request.client_session_id,
-        &src.ip().to_string(),
-        src.port(),
-        &recv_buf[..n],
-    )?;
-
-    sender
-        .try_send((data, peer_addr))
-        .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
-    Ok((request.payload.len() as u64, n as u64))
+        request.payload,
+    ))
 }
 
 async fn proxy<A>(cipher: Cipher, socket1: &mut A) -> io::Result<(u64, u64)>
@@ -435,59 +595,85 @@ where
     Ok((n1, n2))
 }
 
-async fn get_addr_info<A>(conn: &mut A) -> io::Result<(usize, String, u16)>
-where
-    A: AsyncRead + Unpin + ?Sized,
-{
-    let address_type = &mut [0u8; 1];
-    conn.read_exact(address_type).await?;
-    match address_type.first() {
-        // For IPv4 addresses, we read the 4 bytes for the address as
-        // well as 2 bytes for the port.
-        Some(&TYPE_IPV4) => {
-            let buf = &mut [0u8; 6];
-            conn.read_exact(buf).await?;
-            let addr = Ipv4Addr::new(buf[0], buf[1], buf[2], buf[3]);
-            let port = ((buf[4] as u16) << 8) | (buf[5] as u16);
+/// Parse a SOCKS5 address at the start of `buf`, returning its length, host and
+/// port.
+fn parse_socks_addr(buf: &[u8]) -> io::Result<(usize, String, u16)> {
+    let atyp = match buf.first() {
+        Some(atyp) => *atyp,
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "empty address",
+            ))
+        }
+    };
+    match atyp {
+        TYPE_IPV4 => {
+            if buf.len() < 7 {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short ipv4"));
+            }
+            let addr = Ipv4Addr::new(buf[1], buf[2], buf[3], buf[4]);
+            let port = u16::from_be_bytes([buf[5], buf[6]]);
             Ok((7, format!("{addr}"), port))
         }
-        // For IPv6 addresses there's 16 bytes of an address plus two
-        // bytes for a port, so we read that off and then keep going.
-        Some(&TYPE_IPV6) => {
-            let buf = &mut [0u8; 18];
-            conn.read_exact(buf).await?;
-            let a = ((buf[0] as u16) << 8) | (buf[1] as u16);
-            let b = ((buf[2] as u16) << 8) | (buf[3] as u16);
-            let c = ((buf[4] as u16) << 8) | (buf[5] as u16);
-            let d = ((buf[6] as u16) << 8) | (buf[7] as u16);
-            let e = ((buf[8] as u16) << 8) | (buf[9] as u16);
-            let f = ((buf[10] as u16) << 8) | (buf[11] as u16);
-            let g = ((buf[12] as u16) << 8) | (buf[13] as u16);
-            let h = ((buf[14] as u16) << 8) | (buf[15] as u16);
+        TYPE_IPV6 => {
+            if buf.len() < 19 {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short ipv6"));
+            }
+            let a = u16::from_be_bytes([buf[1], buf[2]]);
+            let b = u16::from_be_bytes([buf[3], buf[4]]);
+            let c = u16::from_be_bytes([buf[5], buf[6]]);
+            let d = u16::from_be_bytes([buf[7], buf[8]]);
+            let e = u16::from_be_bytes([buf[9], buf[10]]);
+            let f = u16::from_be_bytes([buf[11], buf[12]]);
+            let g = u16::from_be_bytes([buf[13], buf[14]]);
+            let h = u16::from_be_bytes([buf[15], buf[16]]);
             let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
-            let port = ((buf[16] as u16) << 8) | (buf[17] as u16);
+            let port = u16::from_be_bytes([buf[17], buf[18]]);
             Ok((19, format!("{addr}"), port))
         }
-        // The SOCKSv5 protocol not only supports proxying to specific
-        // IP addresses, but also arbitrary hostnames.
-        Some(&TYPE_DOMAIN) => {
-            let buf1 = &mut [0u8];
-            conn.read_exact(buf1).await?;
-            let buf2 = &mut vec![0u8; buf1[0] as usize + 2];
-            conn.read_exact(buf2).await?;
-            let hostname = &buf2[..buf2.len() - 2];
-            let hostname = if let Ok(hostname) = str::from_utf8(hostname) {
-                hostname
-            } else {
-                return Err(io::Error::other("hostname include invalid utf8"));
-            };
-            let pos = buf2.len() - 2;
-            let port = ((buf2[pos] as u16) << 8) | (buf2[pos + 1] as u16);
-            Ok((2 + buf2.len(), hostname.to_string(), port))
+        TYPE_DOMAIN => {
+            if buf.len() < 2 {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short domain"));
+            }
+            let len = buf[1] as usize;
+            if buf.len() < 2 + len + 2 {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short domain"));
+            }
+            let hostname = str::from_utf8(&buf[2..2 + len])
+                .map_err(|_| io::Error::other("hostname include invalid utf8"))?;
+            let port = u16::from_be_bytes([buf[2 + len], buf[3 + len]]);
+            Ok((2 + len + 2, hostname.to_string(), port))
         }
         n => {
             log::error!("unknown address type, received: {:?}", n);
             Err(io::Error::other("unknown address type, received"))
         }
     }
+}
+
+async fn get_addr_info<A>(conn: &mut A) -> io::Result<(usize, String, u16)>
+where
+    A: AsyncRead + Unpin + ?Sized,
+{
+    let address_type = &mut [0u8; 1];
+    conn.read_exact(address_type).await?;
+    let rest = match address_type[0] {
+        TYPE_IPV4 => 6,
+        TYPE_IPV6 => 18,
+        TYPE_DOMAIN => {
+            let len = &mut [0u8; 1];
+            conn.read_exact(len).await?;
+            1 + len[0] as usize + 2
+        }
+        n => {
+            log::error!("unknown address type, received: {:?}", n);
+            return Err(io::Error::other("unknown address type, received"));
+        }
+    };
+
+    let mut buf = vec![0u8; 1 + rest];
+    buf[0] = address_type[0];
+    conn.read_exact(&mut buf[1..]).await?;
+    parse_socks_addr(&buf)
 }
