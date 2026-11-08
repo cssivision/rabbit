@@ -11,6 +11,7 @@ use cipher::{
     BlockCipherEncrypt, Key, KeyInit, KeyIvInit, StreamCipher,
 };
 use ctr::Ctr128BE;
+use ring::aead::{Aad, Algorithm, LessSafeKey, Nonce as RawNonce, UnboundKey};
 
 use serde::{Deserialize, Serialize};
 
@@ -53,12 +54,8 @@ type Aes192Ctr = Ctr128BE<Aes192>;
 /// AES-256 CTR mode cipher.
 type Aes256Ctr = Ctr128BE<Aes256>;
 
-/// AES-128 GCM mode cipher.
-type Aes128Gcm = AesGcm<aes_gcm::Aes128Gcm>;
 /// AES-192 GCM mode cipher.
 type Aes192Gcm = AesGcm<aes_gcm::AesGcm<aes::Aes192, U12>>;
-/// AES-256 GCM mode cipher.
-type Aes256Gcm = AesGcm<aes_gcm::Aes256Gcm>;
 
 // ChaCha20 is a type alias for ChaCha20Legacy
 type ChaCha20 = chacha20::ChaCha20Legacy;
@@ -163,6 +160,91 @@ impl CipherCore for Salsa20 {
     /// Decrypt data in place.
     fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
         self.apply_keystream(data);
+        Ok(())
+    }
+}
+
+/// AEAD engine backed by *ring*.
+///
+/// *ring* ships hand-written assembly for AES-GCM and ChaCha20-Poly1305, which
+/// is several times faster than the portable RustCrypto implementation it
+/// replaces. The record format is unchanged.
+struct NativeAead {
+    key: LessSafeKey,
+    nonce: Vec<u8>,
+}
+
+impl NativeAead {
+    fn new(algorithm: &'static Algorithm, key: &[u8]) -> NativeAead {
+        let key = UnboundKey::new(algorithm, key).expect("invalid AEAD key length");
+        NativeAead {
+            key: LessSafeKey::new(key),
+            nonce: vec![0u8; 12],
+        }
+    }
+
+    /// Legacy AEAD method: the session key is HKDF-SHA1(key, salt).
+    fn new_legacy(algorithm: &'static Algorithm, key: &[u8], salt: &[u8]) -> NativeAead {
+        let mut subkey = vec![0u8; key.len()];
+        hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
+            .expect("HKDF-SHA1 key derivation failed");
+        NativeAead::new(algorithm, &subkey)
+    }
+
+    /// SIP022 method: the session key is the BLAKE3 XOF of key and seed.
+    fn new_blake3(
+        algorithm: &'static Algorithm,
+        key: &[u8],
+        salt: &[u8],
+        key_len: usize,
+    ) -> NativeAead {
+        let subkey = derive_blake3_subkey(key, salt);
+        NativeAead::new(algorithm, &subkey[..key_len])
+    }
+
+    fn nonce(&self) -> RawNonce {
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&self.nonce);
+        RawNonce::assume_unique_for_key(nonce)
+    }
+}
+
+impl CipherCore for NativeAead {
+    /// Encrypt data in place, writing the detached tag into the reserved tail.
+    fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        if data.len() < 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer too small for AEAD tag",
+            ));
+        }
+        let plaintext_len = data.len() - 16;
+        let (plaintext, tag_space) = data.split_at_mut(plaintext_len);
+        let tag = self
+            .key
+            .seal_in_place_separate_tag(self.nonce(), Aad::empty(), plaintext)
+            .map_err(|e| io::Error::other(format!("AEAD encryption failed: {e:?}")))?;
+        tag_space.copy_from_slice(tag.as_ref());
+        increment_nonce(&mut self.nonce);
+        Ok(())
+    }
+
+    /// Decrypt data in place. The last 16 bytes are the authentication tag.
+    fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
+        if data.len() < 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer too small for AEAD tag",
+            ));
+        }
+        self.key
+            .open_in_place(self.nonce(), Aad::empty(), data)
+            .map_err(|e| {
+                io::Error::other(format!(
+                    "AEAD decryption failed (authentication failed): {e:?}"
+                ))
+            })?;
+        increment_nonce(&mut self.nonce);
         Ok(())
     }
 }
@@ -279,80 +361,6 @@ where
     );
 }
 
-struct Blake3Aes128Gcm {
-    inner: aes_gcm::Aes128Gcm,
-    nonce: Vec<u8>,
-}
-
-impl Blake3Aes128Gcm {
-    fn new(key: &[u8], salt: &[u8]) -> Blake3Aes128Gcm {
-        let subkey = derive_blake3_subkey(key, salt);
-        let key = Key::<aes_gcm::Aes128Gcm>::try_from(&subkey[..16]).expect("invalid key length");
-        Blake3Aes128Gcm {
-            inner: aes_gcm::Aes128Gcm::new(&key),
-            nonce: vec![0u8; 12],
-        }
-    }
-}
-
-impl CipherCore for Blake3Aes128Gcm {
-    impl_aead_methods!(
-        |n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"),
-        aes_gcm::Aes128Gcm
-    );
-}
-
-struct Blake3Aes256Gcm {
-    inner: aes_gcm::Aes256Gcm,
-    nonce: Vec<u8>,
-}
-
-impl Blake3Aes256Gcm {
-    fn new(key: &[u8], salt: &[u8]) -> Blake3Aes256Gcm {
-        let subkey = derive_blake3_subkey(key, salt);
-        let key = Key::<aes_gcm::Aes256Gcm>::try_from(&subkey[..32]).expect("invalid key length");
-        Blake3Aes256Gcm {
-            inner: aes_gcm::Aes256Gcm::new(&key),
-            nonce: vec![0u8; 12],
-        }
-    }
-}
-
-impl CipherCore for Blake3Aes256Gcm {
-    impl_aead_methods!(
-        |n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"),
-        aes_gcm::Aes256Gcm
-    );
-}
-
-struct Blake3ChaCha20Poly1305 {
-    inner: chacha20poly1305::ChaCha20Poly1305,
-    nonce: Vec<u8>,
-}
-
-impl Blake3ChaCha20Poly1305 {
-    fn new(key: &[u8], salt: &[u8]) -> Blake3ChaCha20Poly1305 {
-        let subkey = derive_blake3_subkey(key, salt);
-        let key = chacha20poly1305::Key::try_from(&subkey[..32]).expect("invalid key length");
-        Blake3ChaCha20Poly1305 {
-            inner: chacha20poly1305::ChaCha20Poly1305::new(&key),
-            nonce: vec![0u8; 12],
-        }
-    }
-}
-
-impl CipherCore for Blake3ChaCha20Poly1305 {
-    impl_aead_methods!(
-        |n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"),
-        chacha20poly1305::ChaCha20Poly1305
-    );
-}
-
-struct ChaCha20IetfPoly1305 {
-    inner: chacha20poly1305::ChaCha20Poly1305,
-    nonce: Vec<u8>,
-}
-
 struct ChaCha20Poly1305 {
     inner: chacha20poly1305::ChaChaPoly1305<ChaCha20, U8>,
     nonce: Vec<u8>,
@@ -376,27 +384,6 @@ impl CipherCore for ChaCha20Poly1305 {
     impl_aead_methods!(
         |n| Array::<u8, U8>::try_from(n).expect("invalid nonce length"),
         chacha20poly1305::ChaChaPoly1305<ChaCha20, U8>
-    );
-}
-
-impl ChaCha20IetfPoly1305 {
-    fn new(key: &[u8], salt: &[u8]) -> ChaCha20IetfPoly1305 {
-        // Use HKDF-SHA1 to derive subkey from key and salt
-        let mut subkey = vec![0u8; key.len()];
-        hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
-            .expect("HKDF-SHA1 key derivation failed");
-        let key = chacha20poly1305::Key::try_from(subkey.as_slice()).expect("invalid key length");
-        ChaCha20IetfPoly1305 {
-            inner: chacha20poly1305::ChaCha20Poly1305::new(&key),
-            nonce: vec![0u8; 12],
-        }
-    }
-}
-
-impl CipherCore for ChaCha20IetfPoly1305 {
-    impl_aead_methods!(
-        |n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"),
-        chacha20poly1305::ChaCha20Poly1305
     );
 }
 
@@ -672,15 +659,38 @@ impl Cipher {
             Method::Salsa20 => {
                 Box::new(Salsa20::new_from_slices(key, seed).expect("invalid Salsa20 key/iv"))
             }
-            Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, seed)),
-            Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, seed)),
-            Method::Blake3ChaCha20Poly1305 => Box::new(Blake3ChaCha20Poly1305::new(key, seed)),
+            Method::Blake3Aes128Gcm => Box::new(NativeAead::new_blake3(
+                &ring::aead::AES_128_GCM,
+                key,
+                seed,
+                16,
+            )),
+            Method::Blake3Aes256Gcm => Box::new(NativeAead::new_blake3(
+                &ring::aead::AES_256_GCM,
+                key,
+                seed,
+                32,
+            )),
+            Method::Blake3ChaCha20Poly1305 => Box::new(NativeAead::new_blake3(
+                &ring::aead::CHACHA20_POLY1305,
+                key,
+                seed,
+                32,
+            )),
             // AEAD methods treat the seed as a salt
-            Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, seed)),
+            Method::Aes128Gcm => {
+                Box::new(NativeAead::new_legacy(&ring::aead::AES_128_GCM, key, seed))
+            }
             Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, seed)),
-            Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, seed)),
+            Method::Aes256Gcm => {
+                Box::new(NativeAead::new_legacy(&ring::aead::AES_256_GCM, key, seed))
+            }
             Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, seed)),
-            Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, seed)),
+            Method::ChaCha20IetfPoly1305 => Box::new(NativeAead::new_legacy(
+                &ring::aead::CHACHA20_POLY1305,
+                key,
+                seed,
+            )),
             // For XChaCha20-Poly1305, prefix is actually salt
             Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, seed)),
         }
