@@ -470,16 +470,6 @@ impl Seed {
             Seed::Salt(bytes) | Seed::Iv(bytes) => bytes,
         }
     }
-
-    /// Length of the seed in bytes.
-    pub fn len(&self) -> usize {
-        self.as_bytes().len()
-    }
-
-    /// A seed is never empty; this exists to pair with `len`.
-    pub fn is_empty(&self) -> bool {
-        false
-    }
 }
 
 pub struct Cipher {
@@ -652,7 +642,7 @@ impl Cipher {
 
     /// Length of the seed in bytes.
     pub fn seed_len(&self) -> usize {
-        self.encrypt_seed.len()
+        self.encrypt_seed.as_bytes().len()
     }
 
     fn gen(&self, seed: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {

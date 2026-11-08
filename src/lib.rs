@@ -550,11 +550,7 @@ where
             if first_chunk {
                 out.put_slice(cipher.encrypt_seed().as_bytes());
             }
-            let seed_len = if first_chunk {
-                cipher.encrypt_seed().len()
-            } else {
-                0
-            };
+            let seed_len = if first_chunk { cipher.seed_len() } else { 0 };
             match aead {
                 // AEAD: append [encrypted length][length tag][encrypted payload][payload tag]
                 Some(aead) => aead.encrypt_payload(out, buf, &mut cipher)?,

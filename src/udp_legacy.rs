@@ -128,10 +128,10 @@ mod tests {
     fn round_trip_aead_and_stream() {
         for method in [Method::Aes128Gcm, Method::Aes256Cfb, Method::ChaCha20Ietf] {
             let cipher = Cipher::new(method, "password").unwrap();
-            let mut sealer = cipher.reset();
+            let sealer = cipher.reset();
             let mut opener = cipher.reset();
             let payload = b"hello legacy udp";
-            let datagram = seal(&mut sealer, "127.0.0.1", 8080, payload).unwrap();
+            let datagram = seal(&sealer, "127.0.0.1", 8080, payload).unwrap();
             let (host, port, body) = open(&mut opener, &datagram).unwrap();
             assert_eq!(host, "127.0.0.1");
             assert_eq!(port, 8080);
