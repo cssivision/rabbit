@@ -13,12 +13,21 @@ pub struct Config {
     pub redir: Option<Vec<Redir>>,
 }
 
+/// Which relay a listener runs.
+///
+/// `Stream` covers every stream transport, not just TCP: a `local_addr` that is
+/// a path is served by a Unix listener, and `Stream::Unix` carries it.
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "lowercase")]
 pub enum Network {
+    /// Stream transports: TCP streams and Unix domain streams.
     #[default]
-    Tcp,
-    Udp,
+    #[serde(rename = "tcp", alias = "stream")]
+    Stream,
+    /// Packet transports: UDP datagrams.
+    #[serde(rename = "udp", alias = "packet")]
+    Packet,
+    /// Both relays at once.
+    #[serde(rename = "both")]
     Both,
 }
 

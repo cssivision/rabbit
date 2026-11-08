@@ -160,8 +160,8 @@ impl Service {
 
     pub async fn serve(&self) -> io::Result<()> {
         match self.config.network {
-            Network::Tcp => self.stream_relay().await,
-            Network::Udp => self.packet_relay().await,
+            Network::Stream => self.stream_relay().await,
+            Network::Packet => self.packet_relay().await,
             Network::Both => {
                 let fut1 = self.stream_relay();
                 let fut2 = self.packet_relay();

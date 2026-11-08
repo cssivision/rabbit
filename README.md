@@ -33,8 +33,9 @@ network = "udp"
 ```
 
 Clients are configured with `[[client]]` (socks5 mode) sections; on Linux a
-`[[redir]]` section adds transparent proxying. `network` accepts `"tcp"`,
-`"udp"` or `"both"`.
+`[[redir]]` section adds transparent proxying. `network` accepts `"tcp"` (also
+spelled `"stream"`, which covers Unix domain sockets too), `"udp"` (also
+`"packet"`) or `"both"`.
 
 The UDP wire format follows the shadowsocks specification and is **not
 compatible with rabbit versions before the 2022 UDP work**:
