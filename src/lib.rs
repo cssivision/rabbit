@@ -77,6 +77,8 @@ struct Writer {
     cap: usize,
     /// Flag indicating whether the current write operation has completed reading from input
     read_done: bool,
+    /// Largest payload a single record may carry, cached from the cipher
+    max_payload: usize,
     /// AEAD writer for writing encrypted data
     aead: Option<AeadWriter>,
 }
@@ -106,6 +108,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
         let tag_size = cipher.tag_size();
         let is_aead2022 = cipher.is_aead2022();
         let seed_size = cipher.seed_len();
+        let max_payload = cipher.max_payload_size();
         let cipher = Arc::new(Mutex::new(cipher));
         CipherStream {
             stream,
@@ -133,6 +136,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 pos: 0,
                 cap: 0,
                 read_done: false,
+                max_payload,
                 aead: if is_aead {
                     Some(AeadWriter {
                         tag_size,
@@ -502,22 +506,17 @@ where
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         let me = &mut *self;
-        let writer = &mut me.writer;
         // One write may carry more than one record, but a single record cannot
         // exceed the cipher's payload limit: accept only what fits.
-        let max_payload = me.cipher.lock().unwrap().max_payload_size();
+        let max_payload = me.writer.max_payload;
         let buf = &buf[..buf.len().min(max_payload)];
+        let writer = &mut me.writer;
         // The first encrypted chunk must carry the seed as a prefix, in the same
         // write: clients such as shadowsocks-rust read the whole header chunk
         // (seed included) with a single read call. This is known before any state
         // changes, and the first call always reaches the encrypt step below
         // because `cap` stays 0 until a chunk has been built.
         let first_chunk = !writer.inited;
-        if first_chunk {
-            let mut cipher = me.cipher.lock().unwrap();
-            cipher.init_encrypt();
-            writer.inited = true;
-        }
 
         loop {
             // If our buffer has some data, let's write it out!
@@ -546,9 +545,14 @@ where
                 pos,
                 cap,
                 read_done,
+                inited,
                 ..
             } = writer;
             let mut cipher = me.cipher.lock().unwrap();
+            if first_chunk {
+                cipher.init_encrypt();
+                *inited = true;
+            }
             out.clear();
             if first_chunk {
                 out.put_slice(cipher.encrypt_seed().as_bytes());
