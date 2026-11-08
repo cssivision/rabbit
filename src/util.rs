@@ -35,6 +35,7 @@ pub fn generate_key(data: &[u8], key_len: usize) -> Vec<u8> {
         let d = compute(d);
         key.extend_from_slice(&*d);
     }
+    key.truncate(key_len);
     key
 }
 
