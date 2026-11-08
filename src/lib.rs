@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use futures_util::{AsyncRead, AsyncWrite};
 
 use cipher::Cipher;
@@ -117,8 +117,6 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 cap: 0,
                 aead: if is_aead {
                     Some(AeadReader {
-                        buf: BytesMut::with_capacity(4096),
-                        pos: 0,
                         tag_size,
                         seed_size,
                         state: AeadReaderState::Header,
@@ -139,7 +137,6 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                     Some(AeadWriter {
                         tag_size,
                         state: AeadWriterState::Header,
-                        seed_size,
                         is_aead2022,
                         stream_type: s2,
                     })
@@ -160,8 +157,6 @@ enum StreamType {
 
 /// AEAD reader for decrypting data in AEAD format.
 struct AeadReader {
-    buf: BytesMut,
-    pos: usize,
     tag_size: usize,
     state: AeadReaderState,
     // aead2022 specific
@@ -181,79 +176,67 @@ struct AeadWriter {
     tag_size: usize,
     state: AeadWriterState,
     // aead2022 specific
-    seed_size: usize,
     is_aead2022: bool,
     stream_type: StreamType,
 }
 
 impl AeadWriter {
-    /// Encrypt payload in AEAD format.
-    /// Format: [encrypted payload length (2 bytes)][length tag (16 bytes)][encrypted payload][payload tag (16 bytes)]
-    fn encrypt_payload(&mut self, payload: &[u8], cipher: &mut Cipher) -> io::Result<BytesMut> {
-        loop {
-            match self.state {
-                AeadWriterState::Header => {
-                    if !self.is_aead2022 {
-                        self.state = AeadWriterState::Payload;
-                        continue;
-                    }
-                    let header_size = match self.stream_type {
-                        StreamType::Request => 11 + self.tag_size + payload.len() + self.tag_size,
-                        StreamType::Response => {
-                            11 + self.seed_size + self.tag_size + payload.len() + self.tag_size
-                        }
-                    };
-                    let mut result = BytesMut::with_capacity(header_size);
-                    result.resize(header_size, 0u8);
-                    result[0] = self.stream_type as u8;
-                    result[1..9].copy_from_slice(
-                        &std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs()
-                            .to_be_bytes(),
-                    );
-                    if self.stream_type == StreamType::Response {
-                        result[9..9 + self.seed_size]
-                            .copy_from_slice(cipher.decrypt_seed().as_bytes());
-                        result[9 + self.seed_size..11 + self.seed_size]
-                            .copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
-                    } else {
-                        result[9..11].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
-                    }
-                    // Encrypt first header
-                    cipher.encrypt_in_place(
-                        &mut result[..header_size - self.tag_size - payload.len()],
-                    )?;
-
-                    // Copy payload data
-                    result
-                        [header_size - self.tag_size - payload.len()..header_size - self.tag_size]
-                        .copy_from_slice(payload);
-                    // Encrypt second header
-                    cipher.encrypt_in_place(
-                        &mut result[header_size - payload.len() - self.tag_size..header_size],
-                    )?;
-                    self.state = AeadWriterState::Payload;
-                    return Ok(result);
-                }
-                AeadWriterState::Payload => {
-                    let mut result =
-                        BytesMut::with_capacity(2 + self.tag_size + payload.len() + self.tag_size);
-                    result.resize(2 + self.tag_size + payload.len() + self.tag_size, 0u8);
-                    // Set payload length (first 2 bytes)
-                    result[..2].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
-                    // Encrypt payload length (first 2 bytes + tag)
-                    cipher.encrypt_in_place(&mut result[..2 + self.tag_size])?;
-                    // Copy payload data
-                    result[2 + self.tag_size..2 + self.tag_size + payload.len()]
-                        .copy_from_slice(payload);
-                    // Encrypt payload (payload + tag)
-                    cipher.encrypt_in_place(&mut result[2 + self.tag_size..])?;
-                    return Ok(result);
-                }
-            }
+    /// Append one encrypted AEAD-2022 header to `out`.
+    fn write_aead2022_header(
+        &mut self,
+        out: &mut BytesMut,
+        payload_len: usize,
+        cipher: &mut Cipher,
+    ) -> io::Result<()> {
+        let start = out.len();
+        out.put_u8(self.stream_type as u8);
+        out.put_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        if self.stream_type == StreamType::Response {
+            out.put_slice(cipher.decrypt_seed().as_bytes());
         }
+        out.put_u16(payload_len as u16);
+        // Only the tag area needs clearing: the header itself is fully written above.
+        out.resize(out.len() + self.tag_size, 0u8);
+        cipher.encrypt_in_place(&mut out[start..])?;
+        Ok(())
+    }
+
+    /// Encrypt payload in AEAD format and append it to `out`.
+    /// Format: [encrypted payload length (2 bytes)][length tag (16 bytes)][encrypted payload][payload tag (16 bytes)]
+    fn encrypt_payload(
+        &mut self,
+        out: &mut BytesMut,
+        payload: &[u8],
+        cipher: &mut Cipher,
+    ) -> io::Result<()> {
+        // An AEAD-2022 header already carries the payload length, so the first
+        // record of such a stream has no separate length chunk.
+        let mut with_length = true;
+        if let AeadWriterState::Header = self.state {
+            if self.is_aead2022 {
+                self.write_aead2022_header(out, payload.len(), cipher)?;
+                with_length = false;
+            }
+            self.state = AeadWriterState::Payload;
+        }
+
+        if with_length {
+            let start = out.len();
+            out.put_u16(payload.len() as u16);
+            out.resize(out.len() + self.tag_size, 0u8);
+            cipher.encrypt_in_place(&mut out[start..])?;
+        }
+
+        let start = out.len();
+        out.put_slice(payload);
+        out.resize(out.len() + self.tag_size, 0u8);
+        cipher.encrypt_in_place(&mut out[start..])?;
+        Ok(())
     }
 }
 
@@ -264,24 +247,17 @@ enum AeadReaderState {
 }
 
 impl AeadReader {
-    fn parse_aead2022_header(&mut self, request_seed: &[u8]) -> io::Result<usize> {
-        let stream_type = self.buf[0];
+    /// Parse an AEAD-2022 header that was decrypted in place (tag removed).
+    fn parse_aead2022_header(&self, header: &[u8], request_seed: &[u8]) -> io::Result<usize> {
+        let stream_type = header[0];
         if stream_type != self.stream_type as u8 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "stream type mismatch",
             ));
         }
-        let _ = self.buf.split_to(1);
         let timestamp = u64::from_be_bytes([
-            self.buf[0],
-            self.buf[1],
-            self.buf[2],
-            self.buf[3],
-            self.buf[4],
-            self.buf[5],
-            self.buf[6],
-            self.buf[7],
+            header[1], header[2], header[3], header[4], header[5], header[6], header[7], header[8],
         ]);
         if timestamp.abs_diff(
             std::time::SystemTime::now()
@@ -295,18 +271,18 @@ impl AeadReader {
                 "message must with over 30 seconds",
             ));
         }
-        let _ = self.buf.split_to(8);
-
+        let mut rest = &header[9..];
         if stream_type == StreamType::Response as u8 {
-            let seed = self.buf.split_to(self.seed_size);
+            let (seed, tail) = rest.split_at(self.seed_size);
             if seed != request_seed {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "request salt invalid",
                 ));
             }
+            rest = tail;
         }
-        let size = u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize;
+        let size = u16::from_be_bytes([rest[0], rest[1]]) as usize;
         if size > MAX_PAYLOAD_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -316,12 +292,17 @@ impl AeadReader {
         Ok(size)
     }
 
+    /// Read one record into `buf`, leaving its decrypted payload there.
+    ///
+    /// Returns the payload length, or 0 when the underlying stream ended before
+    /// a full record could be read.
     fn poll_read_aead<A>(
         &mut self,
         cx: &mut Context<'_>,
         mut stream: &mut A,
         cipher: Arc<Mutex<Cipher>>,
-    ) -> Poll<io::Result<BytesMut>>
+        buf: &mut BytesMut,
+    ) -> Poll<io::Result<usize>>
     where
         A: AsyncRead + Unpin + ?Sized,
     {
@@ -336,60 +317,102 @@ impl AeadReader {
                         StreamType::Request => 11 + self.tag_size,
                         StreamType::Response => 11 + self.seed_size + self.tag_size,
                     };
-                    self.buf.resize(header_size, 0u8);
-                    while self.pos < header_size {
-                        let n =
-                            ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
-                        if n == 0 {
-                            return Poll::Ready(Ok(BytesMut::new()));
-                        }
-                        self.pos += n;
+                    buf.clear();
+                    let n = ready!(poll_read_exact(&mut stream, cx, buf, header_size))?;
+                    if n < header_size {
+                        return Poll::Ready(Ok(0));
                     }
                     let mut cipher = cipher.lock().unwrap();
-                    cipher.decrypt_in_place(&mut self.buf[..header_size])?;
-                    let payload_size =
-                        self.parse_aead2022_header(cipher.encrypt_seed().as_bytes())?;
-                    self.pos = 0;
-                    self.state = AeadReaderState::Payload(payload_size);
+                    cipher.decrypt_in_place(&mut buf[..header_size])?;
+                    let size = self.parse_aead2022_header(
+                        &buf[..header_size - self.tag_size],
+                        cipher.encrypt_seed().as_bytes(),
+                    )?;
+                    self.state = AeadReaderState::Payload(size);
                 }
                 AeadReaderState::Length => {
                     let length_size = 2 + self.tag_size;
-                    self.buf.resize(length_size, 0u8);
-                    while self.pos < length_size {
-                        let n =
-                            ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
-                        if n == 0 {
-                            return Poll::Ready(Ok(BytesMut::new()));
-                        }
-                        self.pos += n;
+                    buf.clear();
+                    let n = ready!(poll_read_exact(&mut stream, cx, buf, length_size))?;
+                    if n < length_size {
+                        return Poll::Ready(Ok(0));
                     }
                     let mut cipher = cipher.lock().unwrap();
-                    cipher.decrypt_in_place(&mut self.buf[..length_size])?;
-                    let payload_size = u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize;
-                    self.pos = 0;
-                    self.state = AeadReaderState::Payload(payload_size);
+                    cipher.decrypt_in_place(&mut buf[..length_size])?;
+                    let size = u16::from_be_bytes([buf[0], buf[1]]) as usize;
+                    if size > MAX_PAYLOAD_SIZE {
+                        return Poll::Ready(Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "payload size is too large",
+                        )));
+                    }
+                    self.state = AeadReaderState::Payload(size);
                 }
-                AeadReaderState::Payload(payload_size) => {
-                    self.buf.resize(payload_size + self.tag_size, 0u8);
-                    while self.pos < payload_size + self.tag_size {
-                        let n =
-                            ready!(Pin::new(&mut stream).poll_read(cx, &mut self.buf[self.pos..]))?;
-                        if n == 0 {
-                            return Poll::Ready(Ok(BytesMut::new()));
-                        }
-                        self.pos += n;
+                AeadReaderState::Payload(size) => {
+                    let record_size = size + self.tag_size;
+                    buf.clear();
+                    let n = ready!(poll_read_exact(&mut stream, cx, buf, record_size))?;
+                    if n < record_size {
+                        return Poll::Ready(Ok(0));
                     }
                     let mut cipher = cipher.lock().unwrap();
-                    cipher.decrypt_in_place(&mut self.buf[..payload_size + self.tag_size])?;
-                    self.pos = 0;
+                    cipher.decrypt_in_place(&mut buf[..record_size])?;
+                    drop(cipher);
+                    buf.truncate(size);
                     self.state = AeadReaderState::Length;
-                    let result = self.buf.split_to(payload_size);
-                    self.buf.clear();
-                    return Poll::Ready(Ok(result));
+                    return Poll::Ready(Ok(size));
                 }
             }
         }
     }
+}
+
+/// Read up to `len` bytes into the unused tail of `buf`, without zero-filling it.
+///
+/// Returns the number of bytes appended.
+fn poll_read_uninit<A>(
+    stream: &mut A,
+    cx: &mut Context<'_>,
+    buf: &mut BytesMut,
+    len: usize,
+) -> Poll<io::Result<usize>>
+where
+    A: AsyncRead + Unpin + ?Sized,
+{
+    if len == 0 {
+        return Poll::Ready(Ok(0));
+    }
+    buf.reserve(len);
+    // SAFETY: `chunk_mut` yields at least `len` bytes of spare capacity, and the
+    // stream only reports bytes it actually wrote into that slice.
+    let spare = unsafe { std::slice::from_raw_parts_mut(buf.chunk_mut().as_mut_ptr(), len) };
+    let n = ready!(Pin::new(stream).poll_read(cx, spare))?;
+    if n > 0 {
+        // SAFETY: the first `n` bytes of the spare capacity were just initialised.
+        unsafe { buf.advance_mut(n) };
+    }
+    Poll::Ready(Ok(n))
+}
+
+/// Read exactly `len` bytes into `buf`; stops early on EOF.
+fn poll_read_exact<A>(
+    stream: &mut A,
+    cx: &mut Context<'_>,
+    buf: &mut BytesMut,
+    len: usize,
+) -> Poll<io::Result<usize>>
+where
+    A: AsyncRead + Unpin + ?Sized,
+{
+    let mut read = 0;
+    while read < len {
+        let n = ready!(poll_read_uninit(stream, cx, buf, len - read))?;
+        if n == 0 {
+            break;
+        }
+        read += n;
+    }
+    Poll::Ready(Ok(read))
 }
 
 impl<A> AsyncRead for CipherStream<'_, A>
@@ -402,54 +425,66 @@ where
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         let me = &mut *self;
-        let reader = &mut me.reader;
-        if !reader.inited {
+        if !me.reader.inited {
+            // `pos` doubles as the progress of the seed read: this method may
+            // return `Pending` in the middle of it, and the seed must not be
+            // reread from the start on the next poll.
             let mut cipher = me.cipher.lock().unwrap();
-            while reader.pos < cipher.seed_len() {
+            while me.reader.pos < cipher.seed_len() {
                 let n = ready!(Pin::new(&mut me.stream).poll_read(
                     cx,
-                    &mut cipher.decrypt_seed_mut().as_mut_bytes()[reader.pos..]
+                    &mut cipher.decrypt_seed_mut().as_mut_bytes()[me.reader.pos..]
                 ))?;
                 if n == 0 {
                     return Poll::Ready(Ok(0));
                 }
-                reader.pos += n;
+                me.reader.pos += n;
             }
             cipher.init_decrypt();
-            reader.inited = true;
-            reader.pos = 0;
-            reader.cap = 0;
+            me.reader.inited = true;
+            me.reader.pos = 0;
+            me.reader.cap = 0;
         }
-
         loop {
-            // if our buffer is empty, then we need to read some data to continue.
+            let CipherStream {
+                reader,
+                stream,
+                cipher,
+                ..
+            } = me;
             if reader.pos < reader.cap {
-                let n = (reader.cap - reader.pos).min(buf.len());
+                let n = std::cmp::min(buf.len(), reader.cap - reader.pos);
                 buf[..n].copy_from_slice(&reader.buf[reader.pos..reader.pos + n]);
                 reader.pos += n;
                 return Poll::Ready(Ok(n));
             }
-
-            // if we are using AEAD, then we need to read the data from the stream
-            if let Some(aead) = reader.aead.as_mut() {
-                let data = ready!(aead.poll_read_aead(cx, &mut me.stream, me.cipher.clone()))?;
-                if data.is_empty() {
-                    return Poll::Ready(Ok(0));
+            let Reader {
+                buf: read_buf,
+                aead,
+                pos,
+                cap,
+                inited: _,
+            } = reader;
+            let len = match aead {
+                Some(aead) => {
+                    ready!(aead.poll_read_aead(cx, &mut *stream, cipher.clone(), read_buf))?
                 }
-                reader.pos = 0;
-                reader.cap = data.len();
-                reader.buf = data;
-                continue;
-            }
-            reader.buf.resize(4096, 0u8);
-            let n = ready!(Pin::new(&mut me.stream).poll_read(cx, &mut reader.buf[..]))?;
-            if n == 0 {
+                None => {
+                    read_buf.clear();
+                    let n = ready!(poll_read_uninit(&mut *stream, cx, read_buf, 4096))?;
+                    if n == 0 {
+                        return Poll::Ready(Ok(0));
+                    }
+                    let mut cipher = cipher.lock().unwrap();
+                    cipher.decrypt_in_place(&mut read_buf[..n])?;
+                    n
+                }
+            };
+            if len == 0 {
                 return Poll::Ready(Ok(0));
             }
-            reader.pos = 0;
-            reader.cap = n;
-            let mut cipher = me.cipher.lock().unwrap();
-            cipher.decrypt_in_place(&mut reader.buf[..n])?;
+            *pos = 0;
+            *cap = len;
         }
     }
 }
@@ -502,27 +537,36 @@ where
                 return Poll::Ready(Ok(buf.len()));
             }
 
+            let Writer {
+                buf: out,
+                aead,
+                pos,
+                cap,
+                read_done,
+                ..
+            } = writer;
             let mut cipher = me.cipher.lock().unwrap();
-            let mut data = if let Some(aead) = writer.aead.as_mut() {
-                // AEAD: encrypt payload with format [encrypted length][length tag][encrypted payload][payload tag]
-                aead.encrypt_payload(buf, &mut cipher)?
-            } else {
-                // Non-AEAD: copy data first, then encrypt in place
-                let mut data = BytesMut::from(buf);
-                cipher.encrypt_in_place(&mut data)?;
-                data
-            };
+            out.clear();
             if first_chunk {
-                let seed = cipher.encrypt_seed().as_bytes();
-                let mut with_seed = BytesMut::with_capacity(seed.len() + data.len());
-                with_seed.extend_from_slice(seed);
-                with_seed.extend_from_slice(&data);
-                data = with_seed;
+                out.put_slice(cipher.encrypt_seed().as_bytes());
             }
-            writer.pos = 0;
-            writer.cap = data.len();
-            writer.buf = data;
-            writer.read_done = true;
+            let seed_len = if first_chunk {
+                cipher.encrypt_seed().len()
+            } else {
+                0
+            };
+            match aead {
+                // AEAD: append [encrypted length][length tag][encrypted payload][payload tag]
+                Some(aead) => aead.encrypt_payload(out, buf, &mut cipher)?,
+                // Non-AEAD: append the plaintext and encrypt it in place.
+                None => {
+                    out.put_slice(buf);
+                    cipher.encrypt_in_place(&mut out[seed_len..])?;
+                }
+            }
+            *pos = 0;
+            *cap = out.len();
+            *read_done = true;
         }
     }
 
