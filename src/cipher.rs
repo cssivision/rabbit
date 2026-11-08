@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 use std::io;
 
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::aead::{AeadInOut, Nonce};
+use aes_gcm::aead::{inout::InOutBuf, AeadInOut, Nonce, Tag};
 use base64::Engine;
 use camellia::{Camellia128, Camellia192, Camellia256};
 use cipher::{
@@ -186,8 +186,11 @@ fn increment_nonce(nonce: &mut [u8]) {
 
 /// Shared AEAD encrypt/decrypt implementation to avoid repetition across AEAD ciphers.
 macro_rules! impl_aead_methods {
-    ($make_nonce:expr) => {
+    ($make_nonce:expr, $tag_ty:ty) => {
         /// Encrypt data in place. Buffer must reserve 16 bytes for the authentication tag.
+        ///
+        /// The plaintext is encrypted directly inside `data`; the detached tag is
+        /// written into the reserved tail, so no intermediate buffer is allocated.
         fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
             if data.len() < 16 {
                 return Err(io::Error::new(
@@ -196,29 +199,29 @@ macro_rules! impl_aead_methods {
                 ));
             }
             let plaintext_len = data.len() - 16;
-            let (plaintext_slice, tag_space) = data.split_at_mut(plaintext_len);
-            let mut buffer = plaintext_slice.to_vec();
+            let (plaintext, tag_space) = data.split_at_mut(plaintext_len);
 
             let nonce = $make_nonce(self.nonce.as_slice());
-            match self.inner.encrypt_in_place(&nonce, &[], &mut buffer) {
-                Ok(()) => {
-                    if buffer.len() == plaintext_len + 16 {
-                        plaintext_slice.copy_from_slice(&buffer[..plaintext_len]);
-                        tag_space.copy_from_slice(&buffer[plaintext_len..]);
-                        increment_nonce(&mut self.nonce);
-                        Ok(())
-                    } else {
-                        Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "AEAD encryption output length mismatch",
-                        ))
-                    }
-                }
-                Err(e) => Err(io::Error::other(format!("AEAD encryption failed: {e}"))),
+            let tag = self
+                .inner
+                .encrypt_inout_detached(&nonce, &[], InOutBuf::from(plaintext))
+                .map_err(|e| io::Error::other(format!("AEAD encryption failed: {e}")))?;
+
+            if tag.len() != tag_space.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "AEAD encryption output length mismatch",
+                ));
             }
+            tag_space.copy_from_slice(&tag);
+            increment_nonce(&mut self.nonce);
+            Ok(())
         }
 
         /// Decrypt data in place. Assumes the last 16 bytes are the authentication tag.
+        ///
+        /// The ciphertext is decrypted directly inside `data`; the tag is only
+        /// borrowed, so no intermediate buffer is allocated.
         fn decrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
             if data.len() < 16 {
                 return Err(io::Error::new(
@@ -226,27 +229,25 @@ macro_rules! impl_aead_methods {
                     "buffer too small for AEAD tag",
                 ));
             }
-            let mut buffer = data.to_vec();
+            let plaintext_len = data.len() - 16;
+            let (ciphertext, tag_space) = data.split_at_mut(plaintext_len);
 
+            let tag = Tag::<$tag_ty>::try_from(&tag_space[..]).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "AEAD tag length does not match the cipher",
+                )
+            })?;
             let nonce = $make_nonce(self.nonce.as_slice());
-            match self.inner.decrypt_in_place(&nonce, &[], &mut buffer) {
-                Ok(()) => {
-                    let plaintext_len = buffer.len();
-                    if plaintext_len <= data.len() {
-                        data[..plaintext_len].copy_from_slice(&buffer);
-                        increment_nonce(&mut self.nonce);
-                        Ok(())
-                    } else {
-                        Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "AEAD decryption output length mismatch",
-                        ))
-                    }
-                }
-                Err(e) => Err(io::Error::other(format!(
-                    "AEAD decryption failed (authentication failed): {e}"
-                ))),
-            }
+            self.inner
+                .decrypt_inout_detached(&nonce, &[], InOutBuf::from(ciphertext), &tag)
+                .map_err(|e| {
+                    io::Error::other(format!(
+                        "AEAD decryption failed (authentication failed): {e}"
+                    ))
+                })?;
+            increment_nonce(&mut self.nonce);
+            Ok(())
         }
     };
 }
@@ -272,7 +273,10 @@ impl<G> CipherCore for AesGcm<G>
 where
     G: AeadInOut + KeyInit + Send + Sync + 'static,
 {
-    impl_aead_methods!(|n| Nonce::<G>::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| Nonce::<G>::try_from(n).expect("invalid nonce length"),
+        G
+    );
 }
 
 struct Blake3Aes128Gcm {
@@ -292,7 +296,10 @@ impl Blake3Aes128Gcm {
 }
 
 impl CipherCore for Blake3Aes128Gcm {
-    impl_aead_methods!(|n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"),
+        aes_gcm::Aes128Gcm
+    );
 }
 
 struct Blake3Aes256Gcm {
@@ -312,7 +319,10 @@ impl Blake3Aes256Gcm {
 }
 
 impl CipherCore for Blake3Aes256Gcm {
-    impl_aead_methods!(|n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| Array::<u8, U12>::try_from(n).expect("invalid nonce length"),
+        aes_gcm::Aes256Gcm
+    );
 }
 
 struct Blake3ChaCha20Poly1305 {
@@ -332,7 +342,10 @@ impl Blake3ChaCha20Poly1305 {
 }
 
 impl CipherCore for Blake3ChaCha20Poly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"),
+        chacha20poly1305::ChaCha20Poly1305
+    );
 }
 
 struct ChaCha20IetfPoly1305 {
@@ -360,7 +373,10 @@ impl ChaCha20Poly1305 {
 }
 
 impl CipherCore for ChaCha20Poly1305 {
-    impl_aead_methods!(|n| Array::<u8, U8>::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| Array::<u8, U8>::try_from(n).expect("invalid nonce length"),
+        chacha20poly1305::ChaChaPoly1305<ChaCha20, U8>
+    );
 }
 
 impl ChaCha20IetfPoly1305 {
@@ -378,7 +394,10 @@ impl ChaCha20IetfPoly1305 {
 }
 
 impl CipherCore for ChaCha20IetfPoly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| chacha20poly1305::Nonce::try_from(n).expect("invalid nonce length"),
+        chacha20poly1305::ChaCha20Poly1305
+    );
 }
 
 struct XChaCha20IetfPoly1305 {
@@ -400,7 +419,10 @@ impl XChaCha20IetfPoly1305 {
 }
 
 impl CipherCore for XChaCha20IetfPoly1305 {
-    impl_aead_methods!(|n| chacha20poly1305::XNonce::try_from(n).expect("invalid nonce length"));
+    impl_aead_methods!(
+        |n| chacha20poly1305::XNonce::try_from(n).expect("invalid nonce length"),
+        chacha20poly1305::XChaCha20Poly1305
+    );
 }
 
 /// Per-session value that turns the long-term key into a working cipher.
