@@ -364,6 +364,14 @@ async fn proxy_packet(
     cipher.init_decrypt();
     recv_buf.drain(..seed_len);
     cipher.decrypt_in_place(&mut recv_buf)?;
+    // AEAD keeps the authentication tag at the end of the buffer; it is not
+    // part of the payload that goes back to the application.
+    if cipher.is_aead() {
+        let tag = cipher.tag_size();
+        if recv_buf.len() >= tag {
+            recv_buf.truncate(recv_buf.len() - tag);
+        }
+    }
 
     // Strip the SOCKS5 address prefix that the server's response body starts with.
     if let Some(atyp) = recv_buf.first().copied() {
