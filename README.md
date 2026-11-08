@@ -22,20 +22,20 @@ method = "aes-128-cfb"
 
 ## UDP
 
-A `network = "udp"` entry relays UDP datagrams instead of TCP streams:
+A `network = "packet"` entry relays UDP datagrams instead of streams:
 
 ```toml
 [[server]]
 local_addr = "127.0.0.1:19030"
 password = "AAAAAAAAAAAAAAAAAAAAAA=="
 method = "2022-blake3-aes-128-gcm"
-network = "udp"
+network = "packet"
 ```
 
 Clients are configured with `[[client]]` (socks5 mode) sections; on Linux a
-`[[redir]]` section adds transparent proxying. `network` accepts `"tcp"` (also
-spelled `"stream"`, which covers Unix domain sockets too), `"udp"` (also
-`"packet"`) or `"both"`.
+`[[redir]]` section adds transparent proxying. `network` accepts `"stream"` (TCP
+streams and Unix domain sockets), `"packet"` (UDP datagrams) or `"both"`; it
+defaults to `"stream"`.
 
 The UDP wire format follows the shadowsocks specification and is **not
 compatible with rabbit versions before the 2022 UDP work**:
