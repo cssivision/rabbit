@@ -7,6 +7,7 @@ use crate::cipher::Method;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub server: Option<Vec<Server>>,
     pub client: Option<Vec<Client>>,
@@ -19,7 +20,7 @@ pub struct Config {
 /// a path is served by a Unix listener, and `Stream::Unix` carries it.
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
-pub enum Network {
+pub enum Transport {
     /// Stream transports: TCP streams and Unix domain streams.
     #[default]
     Stream,
@@ -30,15 +31,17 @@ pub enum Network {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct Server {
     pub local_addr: Addr,
     pub password: String,
     pub method: Method,
     #[serde(default)]
-    pub network: Network,
+    pub transport: Transport,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct Client {
     pub local_addr: Addr,
     pub server_addr: SocketAddr,
@@ -47,13 +50,14 @@ pub struct Client {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct Redir {
     pub local_addr: SocketAddr,
     pub server_addr: SocketAddr,
     pub password: String,
     pub method: Method,
     #[serde(default)]
-    pub network: Network,
+    pub transport: Transport,
     pub redir_addr: Option<SocketAddr>,
 }
 

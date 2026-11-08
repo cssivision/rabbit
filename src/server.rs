@@ -16,7 +16,7 @@ use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream};
 
 use crate::cipher::Cipher;
-use crate::config::{self, Addr, Network};
+use crate::config::{self, Addr, Transport};
 use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
@@ -159,10 +159,10 @@ impl Service {
     }
 
     pub async fn serve(&self) -> io::Result<()> {
-        match self.config.network {
-            Network::Stream => self.stream_relay().await,
-            Network::Packet => self.packet_relay().await,
-            Network::Both => {
+        match self.config.transport {
+            Transport::Stream => self.stream_relay().await,
+            Transport::Packet => self.packet_relay().await,
+            Transport::Both => {
                 let fut1 = self.stream_relay();
                 let fut2 = self.packet_relay();
                 let _ = join(fut1, fut2).await;
