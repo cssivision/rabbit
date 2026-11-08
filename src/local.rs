@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use awak::net::TcpStream;
 use awak::time::timeout;
-use awak::util::{copy_bidirectional, IdleTimeout};
+use awak::util::IdleTimeout;
 use bytes::BytesMut;
 use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::cipher::Cipher;
 use crate::config;
+use crate::copy::copy_bidirectional;
 use crate::listener::Listener;
 use crate::socks5;
 use crate::util::generate_raw_addr;

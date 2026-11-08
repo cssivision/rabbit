@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
-use awak::util::{copy_bidirectional, IdleTimeout};
+use awak::util::IdleTimeout;
 use bytes::BytesMut;
 use futures_channel::mpsc::{channel, Receiver, Sender};
 use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
@@ -18,6 +18,7 @@ use socket2::SockAddr;
 
 use crate::cipher::Cipher;
 use crate::config::{self, Transport};
+use crate::copy::copy_bidirectional;
 use crate::listener;
 use crate::udp2022::{PacketWindow, Udp2022};
 use crate::udp_legacy;

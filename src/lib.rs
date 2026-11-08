@@ -1,6 +1,7 @@
 pub mod args;
 pub mod cipher;
 pub mod config;
+pub mod copy;
 pub mod listener;
 pub mod local;
 #[cfg(target_os = "linux")]
@@ -465,6 +466,10 @@ where
     ) -> Poll<io::Result<usize>> {
         let me = &mut *self;
         let writer = &mut me.writer;
+        // One write may carry more than one record, but a single record cannot
+        // exceed the cipher's payload limit: accept only what fits.
+        let max_payload = me.cipher.lock().unwrap().max_payload_size();
+        let buf = &buf[..buf.len().min(max_payload)];
         // The first encrypted chunk must carry the seed as a prefix, in the same
         // write: clients such as shadowsocks-rust read the whole header chunk
         // (seed included) with a single read call. This is known before any state

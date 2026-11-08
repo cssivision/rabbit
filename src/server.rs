@@ -10,12 +10,13 @@ use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
-use awak::util::{copy_bidirectional, IdleTimeout};
+use awak::util::IdleTimeout;
 use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream, StreamExt};
 
 use crate::cipher::Cipher;
 use crate::config::{self, Addr, Transport};
+use crate::copy::copy_bidirectional;
 use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
