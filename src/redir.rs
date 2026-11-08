@@ -334,11 +334,11 @@ async fn proxy_packet(
         .await;
     }
     cipher.init_encrypt();
-    let mut data = cipher.encrypt_iv_or_salt().to_vec();
+    let mut data = cipher.encrypt_prefix().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
     data.extend_from_slice(&buf);
-    cipher.encrypt_in_place(&mut data[cipher.iv_or_salt_len()..])?;
+    cipher.encrypt_in_place(&mut data[cipher.prefix_len()..])?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
@@ -350,7 +350,7 @@ async fn proxy_packet(
     recv_buf.truncate(n);
 
     // The server prefixes each UDP response with its own salt/IV.
-    let salt_len = cipher.iv_or_salt_len();
+    let salt_len = cipher.prefix_len();
     if n < salt_len {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -358,7 +358,7 @@ async fn proxy_packet(
         ));
     }
     cipher
-        .decrypt_iv_or_salt_mut()
+        .decrypt_prefix_mut()
         .copy_from_slice(&recv_buf[..salt_len]);
     cipher.init_decrypt();
     recv_buf.drain(..salt_len);

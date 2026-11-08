@@ -272,18 +272,18 @@ async fn proxy_packet(
     if cipher.is_aead2022() {
         return proxy_packet_2022(cipher, buf, peer_addr, sender, sessions).await;
     }
-    if buf.len() < cipher.iv_or_salt_len() {
+    if buf.len() < cipher.prefix_len() {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "UnexpectedEof",
         ));
     }
-    let iv_or_salt_len = cipher.iv_or_salt_len();
+    let prefix_len = cipher.prefix_len();
     cipher
-        .decrypt_iv_or_salt_mut()
-        .copy_from_slice(&buf[..iv_or_salt_len]);
+        .decrypt_prefix_mut()
+        .copy_from_slice(&buf[..prefix_len]);
     cipher.init_decrypt();
-    buf.drain(..iv_or_salt_len);
+    buf.drain(..prefix_len);
 
     // decrypt recv data.
     cipher.decrypt_in_place(&mut buf)?;
@@ -317,8 +317,8 @@ async fn proxy_packet(
     // A UDP datagram is self-contained: there is no stream handshake that could
     // carry the salt, so every response is prefixed with a fresh salt/IV.
     cipher.init_encrypt();
-    let salt_len = cipher.iv_or_salt_len();
-    let mut data = cipher.encrypt_iv_or_salt().to_vec();
+    let salt_len = cipher.prefix_len();
+    let mut data = cipher.encrypt_prefix().to_vec();
     data.extend_from_slice(&generate_raw_addr(&addr.to_string(), port));
     data.extend_from_slice(&recv_buf);
     if cipher.is_aead() {

@@ -406,9 +406,13 @@ impl CipherCore for XChaCha20IetfPoly1305 {
 pub struct Cipher {
     key: Vec<u8>,
     key_len: usize,
-    iv_or_salt_len: usize,
-    encrypt_iv_or_salt: Vec<u8>,
-    decrypt_iv_or_salt: Vec<u8>,
+    /// Length of the per-session prefix that opens a stream: a salt for AEAD
+    /// methods, an IV for stream ciphers.
+    prefix_len: usize,
+    /// Prefix used when encrypting (written at the start of an outgoing stream).
+    encrypt_prefix: Vec<u8>,
+    /// Prefix used when decrypting (read from the start of an incoming stream).
+    decrypt_prefix: Vec<u8>,
     encrypt: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
     decrypt: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
     method: Method,
@@ -472,7 +476,7 @@ impl Cipher {
     /// The password is used to derive the key for the cipher.
     /// The method is the cipher method to use.
     pub fn new(method: Method, password: &str) -> io::Result<Cipher> {
-        let (key_len, iv_or_salt_len) = match method {
+        let (key_len, prefix_len) = match method {
             Method::Aes128Cfb => (16, 16),
             Method::Aes192Cfb => (24, 16),
             Method::Aes256Cfb => (32, 16),
@@ -514,9 +518,9 @@ impl Cipher {
         Ok(Cipher {
             key,
             key_len,
-            iv_or_salt_len,
-            encrypt_iv_or_salt: vec![0u8; iv_or_salt_len],
-            decrypt_iv_or_salt: vec![0u8; iv_or_salt_len],
+            prefix_len,
+            encrypt_prefix: vec![0u8; prefix_len],
+            decrypt_prefix: vec![0u8; prefix_len],
             encrypt: None,
             decrypt: None,
             method,
@@ -525,92 +529,81 @@ impl Cipher {
 
     /// Initialize the encryption cipher.
     pub fn init_encrypt(&mut self) {
-        self.encrypt = Some(self.gen(&self.encrypt_iv_or_salt));
+        self.encrypt = Some(self.gen(&self.encrypt_prefix));
     }
 
     /// Initialize the decryption cipher.
     pub fn init_decrypt(&mut self) {
-        self.decrypt = Some(self.gen(&self.decrypt_iv_or_salt));
+        self.decrypt = Some(self.gen(&self.decrypt_prefix));
     }
 
-    /// Get the IV (or salt for GCM methods).
-    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM,
-    /// Blake3Aes128Gcm, Blake3Aes256Gcm, Blake3ChaCha20Poly1305,
-    /// ChaCha20Poly1305, ChaCha20IetfPoly1305, XChaCha20IetfPoly1305), this returns the salt.
-    /// For other methods, this returns the IV.
-    pub fn encrypt_iv_or_salt(&self) -> &[u8] {
-        &self.encrypt_iv_or_salt
+    /// Prefix that opens an outgoing stream.
+    ///
+    /// AEAD methods use a random salt here, stream ciphers use an IV.
+    pub fn encrypt_prefix(&self) -> &[u8] {
+        &self.encrypt_prefix
     }
 
-    /// Get the IV (or salt for GCM methods).
-    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM,
-    /// Blake3Aes128Gcm, Blake3Aes256Gcm, Blake3ChaCha20Poly1305,
-    /// ChaCha20Poly1305, ChaCha20IetfPoly1305, XChaCha20IetfPoly1305), this returns the salt.
-    /// For other methods, this returns the IV.
-    pub fn decrypt_iv_or_salt(&self) -> &[u8] {
-        &self.decrypt_iv_or_salt
+    /// Prefix that opens an incoming stream (salt for AEAD, IV for stream
+    /// ciphers).
+    pub fn decrypt_prefix(&self) -> &[u8] {
+        &self.decrypt_prefix
     }
 
-    /// Get the length of IV (or salt for GCM/ChaCha20-Poly1305 methods).
-    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM) and ChaCha20-Poly1305, this returns the salt length.
-    /// For other methods, this returns the IV length.
-    pub fn iv_or_salt_len(&self) -> usize {
-        self.iv_or_salt_len
+    /// Length of the stream prefix, in bytes.
+    pub fn prefix_len(&self) -> usize {
+        self.prefix_len
     }
 
-    /// Get mutable reference to the IV (or salt for GCM/ChaCha20-Poly1305 methods).
-    /// For GCM methods (AES-128-GCM, AES-192-GCM, AES-256-GCM) and ChaCha20-Poly1305, this is the salt.
-    /// For other methods, this is the IV.
-    pub fn decrypt_iv_or_salt_mut(&mut self) -> &mut [u8] {
-        &mut self.decrypt_iv_or_salt[..]
+    /// Mutable view of the incoming stream prefix, for filling it from the
+    /// wire before calling `init_decrypt`.
+    pub fn decrypt_prefix_mut(&mut self) -> &mut [u8] {
+        &mut self.decrypt_prefix[..]
     }
 
-    pub fn encrypt_iv_or_salt_mut(&mut self) -> &mut [u8] {
-        &mut self.encrypt_iv_or_salt[..]
+    /// Mutable view of the outgoing stream prefix, for randomizing it.
+    pub fn encrypt_prefix_mut(&mut self) -> &mut [u8] {
+        &mut self.encrypt_prefix[..]
     }
 
-    fn gen(&self, iv_or_salt: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
+    fn gen(&self, prefix: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
         match self.method {
-            Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, iv_or_salt)),
-            Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, iv_or_salt)),
-            Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, iv_or_salt)),
-            Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, iv_or_salt)),
-            Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, iv_or_salt)),
-            Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, iv_or_salt)),
+            Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, prefix)),
+            Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, prefix)),
+            Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, prefix)),
+            Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, prefix)),
+            Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, prefix)),
+            Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, prefix)),
             Method::Aes128Ctr => {
-                Box::new(Aes128Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"))
+                Box::new(Aes128Ctr::new_from_slices(key, prefix).expect("invalid CTR key/iv"))
             }
             Method::Aes192Ctr => {
-                Box::new(Aes192Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"))
+                Box::new(Aes192Ctr::new_from_slices(key, prefix).expect("invalid CTR key/iv"))
             }
             Method::Aes256Ctr => {
-                Box::new(Aes256Ctr::new_from_slices(key, iv_or_salt).expect("invalid CTR key/iv"))
+                Box::new(Aes256Ctr::new_from_slices(key, prefix).expect("invalid CTR key/iv"))
             }
-            Method::ChaCha20 => Box::new(
-                ChaCha20::new_from_slices(key, iv_or_salt).expect("invalid ChaCha20 key/iv"),
-            ),
+            Method::ChaCha20 => {
+                Box::new(ChaCha20::new_from_slices(key, prefix).expect("invalid ChaCha20 key/iv"))
+            }
             Method::ChaCha20Ietf => Box::new(
-                ChaCha20Ietf::new_from_slices(key, iv_or_salt).expect("invalid ChaCha20 key/iv"),
+                ChaCha20Ietf::new_from_slices(key, prefix).expect("invalid ChaCha20 key/iv"),
             ),
             Method::Salsa20 => {
-                Box::new(Salsa20::new_from_slices(key, iv_or_salt).expect("invalid Salsa20 key/iv"))
+                Box::new(Salsa20::new_from_slices(key, prefix).expect("invalid Salsa20 key/iv"))
             }
-            Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, iv_or_salt)),
-            Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, iv_or_salt)),
-            Method::Blake3ChaCha20Poly1305 => {
-                Box::new(Blake3ChaCha20Poly1305::new(key, iv_or_salt))
-            }
-            // For GCM methods, iv_or_salt is actually salt
-            Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, iv_or_salt)),
-            Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, iv_or_salt)),
-            Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, iv_or_salt)),
-            // For ChaCha20-Poly1305, iv_or_salt is actually salt
-            Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, iv_or_salt)),
-            // For ChaCha20-IETF-Poly1305, iv_or_salt is actually salt
-            Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, iv_or_salt)),
-            // For XChaCha20-Poly1305, iv_or_salt is actually salt
-            Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, iv_or_salt)),
+            Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, prefix)),
+            Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, prefix)),
+            Method::Blake3ChaCha20Poly1305 => Box::new(Blake3ChaCha20Poly1305::new(key, prefix)),
+            // AEAD methods treat the prefix as a salt
+            Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, prefix)),
+            Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, prefix)),
+            Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, prefix)),
+            Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, prefix)),
+            Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, prefix)),
+            // For XChaCha20-Poly1305, prefix is actually salt
+            Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, prefix)),
         }
     }
 
@@ -674,20 +667,20 @@ impl Cipher {
     /// Reset the cipher.
     #[must_use]
     pub fn reset(&self) -> Cipher {
-        let mut encrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
-        rand::fill(&mut encrypt_iv_or_salt[..]);
-        // Never seed the decrypt IV/salt from the *old* `encrypt_iv_or_salt`
+        let mut encrypt_prefix = vec![0u8; self.prefix_len];
+        rand::fill(&mut encrypt_prefix[..]);
+        // Never seed the decrypt IV/salt from the *old* `encrypt_prefix`
         // (all zeros for a freshly built cipher): that silently made every UDP
         // packet use an all-zero salt. The real value comes from the wire frame
         // (`CipherStream`) or from the UDP datagram header.
-        let mut decrypt_iv_or_salt = vec![0u8; self.iv_or_salt_len];
-        rand::fill(&mut decrypt_iv_or_salt[..]);
+        let mut decrypt_prefix = vec![0u8; self.prefix_len];
+        rand::fill(&mut decrypt_prefix[..]);
 
         Cipher {
             key: self.key.clone(),
-            encrypt_iv_or_salt,
-            decrypt_iv_or_salt,
-            iv_or_salt_len: self.iv_or_salt_len,
+            encrypt_prefix,
+            decrypt_prefix,
+            prefix_len: self.prefix_len,
             key_len: self.key_len,
             encrypt: None,
             decrypt: None,

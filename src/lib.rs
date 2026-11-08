@@ -106,7 +106,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
         let is_aead = cipher.is_aead();
         let tag_size = cipher.tag_size();
         let is_aead2022 = cipher.is_aead2022();
-        let salt_size = cipher.iv_or_salt_len();
+        let salt_size = cipher.prefix_len();
         let cipher = Arc::new(Mutex::new(cipher));
         CipherStream {
             stream,
@@ -216,7 +216,7 @@ impl AeadWriter {
                             .to_be_bytes(),
                     );
                     if self.stream_type == StreamType::Response {
-                        result[9..9 + self.salt_size].copy_from_slice(cipher.decrypt_iv_or_salt());
+                        result[9..9 + self.salt_size].copy_from_slice(cipher.decrypt_prefix());
                         result[9 + self.salt_size..11 + self.salt_size]
                             .copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
                     } else {
@@ -348,7 +348,7 @@ impl AeadReader {
                     }
                     let mut cipher = cipher.lock().unwrap();
                     cipher.decrypt_in_place(&mut self.buf[..header_size])?;
-                    let payload_size = self.parse_aead2022_header(cipher.encrypt_iv_or_salt())?;
+                    let payload_size = self.parse_aead2022_header(cipher.encrypt_prefix())?;
                     self.pos = 0;
                     self.state = AeadReaderState::Payload(payload_size);
                 }
@@ -405,9 +405,9 @@ where
         let reader = &mut me.reader;
         if !reader.inited {
             let mut cipher = me.cipher.lock().unwrap();
-            while reader.pos < cipher.iv_or_salt_len() {
+            while reader.pos < cipher.prefix_len() {
                 let n = ready!(Pin::new(&mut me.stream)
-                    .poll_read(cx, &mut cipher.decrypt_iv_or_salt_mut()[reader.pos..]))?;
+                    .poll_read(cx, &mut cipher.decrypt_prefix_mut()[reader.pos..]))?;
                 if n == 0 {
                     return Poll::Ready(Ok(0));
                 }
@@ -471,11 +471,9 @@ where
             // Keep the salt pending: it must be written in the same write as the
             // first encrypted chunk, because clients such as shadowsocks-rust read
             // the whole header chunk (salt included) with a single read call.
-            let n = cipher.iv_or_salt_len();
+            let n = cipher.prefix_len();
             writer.salt.clear();
-            writer
-                .salt
-                .extend_from_slice(&cipher.encrypt_iv_or_salt()[..n]);
+            writer.salt.extend_from_slice(&cipher.encrypt_prefix()[..n]);
         }
 
         loop {
