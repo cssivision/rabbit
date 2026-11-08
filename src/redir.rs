@@ -334,11 +334,11 @@ async fn proxy_packet(
         .await;
     }
     cipher.init_encrypt();
-    let mut data = cipher.encrypt_prefix().to_vec();
+    let mut data = cipher.encrypt_seed().as_bytes().to_vec();
     let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
     data.extend_from_slice(&rawaddr);
     data.extend_from_slice(&buf);
-    cipher.encrypt_in_place(&mut data[cipher.prefix_len()..])?;
+    cipher.encrypt_in_place(&mut data[cipher.seed_len()..])?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
@@ -350,18 +350,19 @@ async fn proxy_packet(
     recv_buf.truncate(n);
 
     // The server prefixes each UDP response with its own salt/IV.
-    let salt_len = cipher.prefix_len();
-    if n < salt_len {
+    let seed_len = cipher.seed_len();
+    if n < seed_len {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "udp response shorter than salt",
         ));
     }
     cipher
-        .decrypt_prefix_mut()
-        .copy_from_slice(&recv_buf[..salt_len]);
+        .decrypt_seed_mut()
+        .as_mut_bytes()
+        .copy_from_slice(&recv_buf[..seed_len]);
     cipher.init_decrypt();
-    recv_buf.drain(..salt_len);
+    recv_buf.drain(..seed_len);
     cipher.decrypt_in_place(&mut recv_buf)?;
 
     // Strip the SOCKS5 address prefix that the server's response body starts with.

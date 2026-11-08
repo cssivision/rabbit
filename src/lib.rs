@@ -78,8 +78,6 @@ struct Writer {
     read_done: bool,
     /// AEAD writer for writing encrypted data
     aead: Option<AeadWriter>,
-    /// IV/salt that still has to be prepended to the next encrypted chunk
-    salt: BytesMut,
 }
 
 enum ServerType {
@@ -106,7 +104,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
         let is_aead = cipher.is_aead();
         let tag_size = cipher.tag_size();
         let is_aead2022 = cipher.is_aead2022();
-        let salt_size = cipher.prefix_len();
+        let seed_size = cipher.seed_len();
         let cipher = Arc::new(Mutex::new(cipher));
         CipherStream {
             stream,
@@ -121,7 +119,7 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                         buf: BytesMut::with_capacity(4096),
                         pos: 0,
                         tag_size,
-                        salt_size,
+                        seed_size,
                         state: AeadReaderState::Header,
                         is_aead2022,
                         stream_type: s1,
@@ -136,12 +134,11 @@ impl<'a, A: ?Sized> CipherStream<'a, A> {
                 pos: 0,
                 cap: 0,
                 read_done: false,
-                salt: BytesMut::new(),
                 aead: if is_aead {
                     Some(AeadWriter {
                         tag_size,
                         state: AeadWriterState::Header,
-                        salt_size,
+                        seed_size,
                         is_aead2022,
                         stream_type: s2,
                     })
@@ -167,7 +164,7 @@ struct AeadReader {
     tag_size: usize,
     state: AeadReaderState,
     // aead2022 specific
-    salt_size: usize,
+    seed_size: usize,
     is_aead2022: bool,
     stream_type: StreamType,
 }
@@ -183,7 +180,7 @@ struct AeadWriter {
     tag_size: usize,
     state: AeadWriterState,
     // aead2022 specific
-    salt_size: usize,
+    seed_size: usize,
     is_aead2022: bool,
     stream_type: StreamType,
 }
@@ -202,7 +199,7 @@ impl AeadWriter {
                     let header_size = match self.stream_type {
                         StreamType::Request => 11 + self.tag_size + payload.len() + self.tag_size,
                         StreamType::Response => {
-                            11 + self.salt_size + self.tag_size + payload.len() + self.tag_size
+                            11 + self.seed_size + self.tag_size + payload.len() + self.tag_size
                         }
                     };
                     let mut result = BytesMut::with_capacity(header_size);
@@ -216,8 +213,9 @@ impl AeadWriter {
                             .to_be_bytes(),
                     );
                     if self.stream_type == StreamType::Response {
-                        result[9..9 + self.salt_size].copy_from_slice(cipher.decrypt_prefix());
-                        result[9 + self.salt_size..11 + self.salt_size]
+                        result[9..9 + self.seed_size]
+                            .copy_from_slice(cipher.decrypt_seed().as_bytes());
+                        result[9 + self.seed_size..11 + self.seed_size]
                             .copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
                     } else {
                         result[9..11].copy_from_slice(&u16::to_be_bytes(payload.len() as u16));
@@ -265,7 +263,7 @@ enum AeadReaderState {
 }
 
 impl AeadReader {
-    fn parse_aead2022_header(&mut self, request_salt: &[u8]) -> io::Result<usize> {
+    fn parse_aead2022_header(&mut self, request_seed: &[u8]) -> io::Result<usize> {
         let stream_type = self.buf[0];
         if stream_type != self.stream_type as u8 {
             return Err(io::Error::new(
@@ -299,8 +297,8 @@ impl AeadReader {
         let _ = self.buf.split_to(8);
 
         if stream_type == StreamType::Response as u8 {
-            let salt = self.buf.split_to(self.salt_size);
-            if salt != request_salt {
+            let seed = self.buf.split_to(self.seed_size);
+            if seed != request_seed {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "request salt invalid",
@@ -335,7 +333,7 @@ impl AeadReader {
                     }
                     let header_size = match self.stream_type {
                         StreamType::Request => 11 + self.tag_size,
-                        StreamType::Response => 11 + self.salt_size + self.tag_size,
+                        StreamType::Response => 11 + self.seed_size + self.tag_size,
                     };
                     self.buf.resize(header_size, 0u8);
                     while self.pos < header_size {
@@ -348,7 +346,8 @@ impl AeadReader {
                     }
                     let mut cipher = cipher.lock().unwrap();
                     cipher.decrypt_in_place(&mut self.buf[..header_size])?;
-                    let payload_size = self.parse_aead2022_header(cipher.encrypt_prefix())?;
+                    let payload_size =
+                        self.parse_aead2022_header(cipher.encrypt_seed().as_bytes())?;
                     self.pos = 0;
                     self.state = AeadReaderState::Payload(payload_size);
                 }
@@ -405,9 +404,11 @@ where
         let reader = &mut me.reader;
         if !reader.inited {
             let mut cipher = me.cipher.lock().unwrap();
-            while reader.pos < cipher.prefix_len() {
-                let n = ready!(Pin::new(&mut me.stream)
-                    .poll_read(cx, &mut cipher.decrypt_prefix_mut()[reader.pos..]))?;
+            while reader.pos < cipher.seed_len() {
+                let n = ready!(Pin::new(&mut me.stream).poll_read(
+                    cx,
+                    &mut cipher.decrypt_seed_mut().as_mut_bytes()[reader.pos..]
+                ))?;
                 if n == 0 {
                     return Poll::Ready(Ok(0));
                 }
@@ -463,17 +464,16 @@ where
     ) -> Poll<io::Result<usize>> {
         let me = &mut *self;
         let writer = &mut me.writer;
-        if !writer.inited {
+        // The first encrypted chunk must carry the seed as a prefix, in the same
+        // write: clients such as shadowsocks-rust read the whole header chunk
+        // (seed included) with a single read call. This is known before any state
+        // changes, and the first call always reaches the encrypt step below
+        // because `cap` stays 0 until a chunk has been built.
+        let first_chunk = !writer.inited;
+        if first_chunk {
             let mut cipher = me.cipher.lock().unwrap();
             cipher.init_encrypt();
             writer.inited = true;
-
-            // Keep the salt pending: it must be written in the same write as the
-            // first encrypted chunk, because clients such as shadowsocks-rust read
-            // the whole header chunk (salt included) with a single read call.
-            let n = cipher.prefix_len();
-            writer.salt.clear();
-            writer.salt.extend_from_slice(&cipher.encrypt_prefix()[..n]);
         }
 
         loop {
@@ -507,12 +507,12 @@ where
                 cipher.encrypt_in_place(&mut data)?;
                 data
             };
-            if !writer.salt.is_empty() {
-                let mut with_salt = BytesMut::with_capacity(writer.salt.len() + data.len());
-                with_salt.extend_from_slice(&writer.salt);
-                with_salt.extend_from_slice(&data);
-                writer.salt.clear();
-                data = with_salt;
+            if first_chunk {
+                let seed = cipher.encrypt_seed().as_bytes();
+                let mut with_seed = BytesMut::with_capacity(seed.len() + data.len());
+                with_seed.extend_from_slice(seed);
+                with_seed.extend_from_slice(&data);
+                data = with_seed;
             }
             writer.pos = 0;
             writer.cap = data.len();

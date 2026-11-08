@@ -403,16 +403,70 @@ impl CipherCore for XChaCha20IetfPoly1305 {
     impl_aead_methods!(|n| chacha20poly1305::XNonce::try_from(n).expect("invalid nonce length"));
 }
 
+/// Per-session value that turns the long-term key into a working cipher.
+///
+/// The kind depends on the method: an AEAD cipher derives its session subkey
+/// from a random salt, while a stream cipher takes an IV that initializes the
+/// keystream directly. Both are public, short-lived, and regenerated for every
+/// session, which is what separates them from the key itself.
+#[derive(Debug, Clone)]
+pub enum Seed {
+    /// AEAD methods: random salt, used as the HKDF salt of the session subkey.
+    Salt(Vec<u8>),
+    /// Stream ciphers: IV that initializes the keystream.
+    Iv(Vec<u8>),
+}
+
+impl Seed {
+    /// A zero-filled seed of the kind that `method` uses.
+    fn zeroed(method: &Method, len: usize) -> Seed {
+        if is_aead(method) {
+            Seed::Salt(vec![0u8; len])
+        } else {
+            Seed::Iv(vec![0u8; len])
+        }
+    }
+
+    /// An all-zero seed of the same kind and length.
+    fn zeroed_like(&self) -> Seed {
+        match self {
+            Seed::Salt(bytes) => Seed::Salt(vec![0u8; bytes.len()]),
+            Seed::Iv(bytes) => Seed::Iv(vec![0u8; bytes.len()]),
+        }
+    }
+
+    /// Raw bytes of the seed.
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Seed::Salt(bytes) | Seed::Iv(bytes) => bytes,
+        }
+    }
+
+    /// Mutable raw bytes, for filling the seed from the wire or from the RNG.
+    pub fn as_mut_bytes(&mut self) -> &mut [u8] {
+        match self {
+            Seed::Salt(bytes) | Seed::Iv(bytes) => bytes,
+        }
+    }
+
+    /// Length of the seed in bytes.
+    pub fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+
+    /// A seed is never empty; this exists to pair with `len`.
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+}
+
 pub struct Cipher {
     key: Vec<u8>,
     key_len: usize,
-    /// Length of the per-session prefix that opens a stream: a salt for AEAD
-    /// methods, an IV for stream ciphers.
-    prefix_len: usize,
-    /// Prefix used when encrypting (written at the start of an outgoing stream).
-    encrypt_prefix: Vec<u8>,
-    /// Prefix used when decrypting (read from the start of an incoming stream).
-    decrypt_prefix: Vec<u8>,
+    /// Seed used when encrypting, written at the start of an outgoing stream.
+    encrypt_seed: Seed,
+    /// Seed used when decrypting, read from the start of an incoming stream.
+    decrypt_seed: Seed,
     encrypt: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
     decrypt: Option<Box<dyn CipherCore + Send + Sync + 'static>>,
     method: Method,
@@ -464,6 +518,21 @@ pub enum Method {
     XChaCha20IetfPoly1305,
 }
 
+fn is_aead(method: &Method) -> bool {
+    matches!(
+        method,
+        Method::Aes128Gcm
+            | Method::Aes192Gcm
+            | Method::Aes256Gcm
+            | Method::ChaCha20Poly1305
+            | Method::ChaCha20IetfPoly1305
+            | Method::XChaCha20IetfPoly1305
+            | Method::Blake3Aes128Gcm
+            | Method::Blake3Aes256Gcm
+            | Method::Blake3ChaCha20Poly1305
+    )
+}
+
 fn is_aead2022(method: &Method) -> bool {
     matches!(
         method,
@@ -476,7 +545,7 @@ impl Cipher {
     /// The password is used to derive the key for the cipher.
     /// The method is the cipher method to use.
     pub fn new(method: Method, password: &str) -> io::Result<Cipher> {
-        let (key_len, prefix_len) = match method {
+        let (key_len, seed_len) = match method {
             Method::Aes128Cfb => (16, 16),
             Method::Aes192Cfb => (24, 16),
             Method::Aes256Cfb => (32, 16),
@@ -515,95 +584,93 @@ impl Cipher {
             generate_key(password.as_bytes(), key_len)
         };
 
+        let seed = Seed::zeroed(&method, seed_len);
         Ok(Cipher {
             key,
             key_len,
-            prefix_len,
-            encrypt_prefix: vec![0u8; prefix_len],
-            decrypt_prefix: vec![0u8; prefix_len],
+            encrypt_seed: seed.clone(),
+            decrypt_seed: seed,
             encrypt: None,
             decrypt: None,
             method,
         })
     }
 
-    /// Initialize the encryption cipher.
+    /// Initialize the encryption cipher from the current encrypt seed.
     pub fn init_encrypt(&mut self) {
-        self.encrypt = Some(self.gen(&self.encrypt_prefix));
+        self.encrypt = Some(self.gen(self.encrypt_seed.as_bytes()));
     }
 
-    /// Initialize the decryption cipher.
+    /// Initialize the decryption cipher from the current decrypt seed.
     pub fn init_decrypt(&mut self) {
-        self.decrypt = Some(self.gen(&self.decrypt_prefix));
+        self.decrypt = Some(self.gen(self.decrypt_seed.as_bytes()));
     }
 
-    /// Prefix that opens an outgoing stream.
-    ///
-    /// AEAD methods use a random salt here, stream ciphers use an IV.
-    pub fn encrypt_prefix(&self) -> &[u8] {
-        &self.encrypt_prefix
+    /// Seed that opens an outgoing stream: a salt for AEAD methods, an IV for
+    /// stream ciphers.
+    pub fn encrypt_seed(&self) -> &Seed {
+        &self.encrypt_seed
     }
 
-    /// Prefix that opens an incoming stream (salt for AEAD, IV for stream
-    /// ciphers).
-    pub fn decrypt_prefix(&self) -> &[u8] {
-        &self.decrypt_prefix
+    /// Seed that opens an incoming stream.
+    pub fn decrypt_seed(&self) -> &Seed {
+        &self.decrypt_seed
     }
 
-    /// Length of the stream prefix, in bytes.
-    pub fn prefix_len(&self) -> usize {
-        self.prefix_len
+    /// Mutable encrypt seed, for randomizing it before a new session.
+    pub fn encrypt_seed_mut(&mut self) -> &mut Seed {
+        &mut self.encrypt_seed
     }
 
-    /// Mutable view of the incoming stream prefix, for filling it from the
-    /// wire before calling `init_decrypt`.
-    pub fn decrypt_prefix_mut(&mut self) -> &mut [u8] {
-        &mut self.decrypt_prefix[..]
+    /// Mutable decrypt seed, for filling it from the wire before
+    /// `init_decrypt`.
+    pub fn decrypt_seed_mut(&mut self) -> &mut Seed {
+        &mut self.decrypt_seed
     }
 
-    /// Mutable view of the outgoing stream prefix, for randomizing it.
-    pub fn encrypt_prefix_mut(&mut self) -> &mut [u8] {
-        &mut self.encrypt_prefix[..]
+    /// Length of the seed in bytes.
+    pub fn seed_len(&self) -> usize {
+        self.encrypt_seed.len()
     }
 
-    fn gen(&self, prefix: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
+    fn gen(&self, seed: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
         match self.method {
-            Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, prefix)),
-            Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, prefix)),
-            Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, prefix)),
-            Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, prefix)),
-            Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, prefix)),
-            Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, prefix)),
+            Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, seed)),
+            Method::Aes192Cfb => Box::new(Aes192Cfb::new(key, seed)),
+            Method::Aes256Cfb => Box::new(Aes256Cfb::new(key, seed)),
+            Method::Camellia128Cfb => Box::new(Camellia128Cfb::new(key, seed)),
+            Method::Camellia192Cfb => Box::new(Camellia192Cfb::new(key, seed)),
+            Method::Camellia256Cfb => Box::new(Camellia256Cfb::new(key, seed)),
             Method::Aes128Ctr => {
-                Box::new(Aes128Ctr::new_from_slices(key, prefix).expect("invalid CTR key/iv"))
+                Box::new(Aes128Ctr::new_from_slices(key, seed).expect("invalid CTR key/iv"))
             }
             Method::Aes192Ctr => {
-                Box::new(Aes192Ctr::new_from_slices(key, prefix).expect("invalid CTR key/iv"))
+                Box::new(Aes192Ctr::new_from_slices(key, seed).expect("invalid CTR key/iv"))
             }
             Method::Aes256Ctr => {
-                Box::new(Aes256Ctr::new_from_slices(key, prefix).expect("invalid CTR key/iv"))
+                Box::new(Aes256Ctr::new_from_slices(key, seed).expect("invalid CTR key/iv"))
             }
             Method::ChaCha20 => {
-                Box::new(ChaCha20::new_from_slices(key, prefix).expect("invalid ChaCha20 key/iv"))
+                Box::new(ChaCha20::new_from_slices(key, seed).expect("invalid ChaCha20 key/iv"))
             }
-            Method::ChaCha20Ietf => Box::new(
-                ChaCha20Ietf::new_from_slices(key, prefix).expect("invalid ChaCha20 key/iv"),
-            ),
+            Method::ChaCha20Ietf => {
+                Box::new(ChaCha20Ietf::new_from_slices(key, seed).expect("invalid ChaCha20 key/iv"))
+            }
             Method::Salsa20 => {
-                Box::new(Salsa20::new_from_slices(key, prefix).expect("invalid Salsa20 key/iv"))
+                Box::new(Salsa20::new_from_slices(key, seed).expect("invalid Salsa20 key/iv"))
             }
-            Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, prefix)),
-            Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, prefix)),
-            Method::Blake3ChaCha20Poly1305 => Box::new(Blake3ChaCha20Poly1305::new(key, prefix)),
-            // AEAD methods treat the prefix as a salt
-            Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, prefix)),
-            Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, prefix)),
-            Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, prefix)),
-            Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, prefix)),
-            Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, prefix)),
+            Method::Blake3Aes128Gcm => Box::new(Blake3Aes128Gcm::new(key, seed)),
+            Method::Blake3Aes256Gcm => Box::new(Blake3Aes256Gcm::new(key, seed)),
+            Method::Blake3ChaCha20Poly1305 => Box::new(Blake3ChaCha20Poly1305::new(key, seed)),
+            // AEAD methods treat the seed as a salt
+            Method::Aes128Gcm => Box::new(Aes128Gcm::new(key, seed)),
+            Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, seed)),
+            Method::Aes256Gcm => Box::new(Aes256Gcm::new(key, seed)),
+            Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, seed)),
+            Method::ChaCha20IetfPoly1305 => Box::new(ChaCha20IetfPoly1305::new(key, seed)),
             // For XChaCha20-Poly1305, prefix is actually salt
-            Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, prefix)),
+            Method::XChaCha20IetfPoly1305 => Box::new(XChaCha20IetfPoly1305::new(key, seed)),
         }
     }
 
@@ -617,18 +684,7 @@ impl Cipher {
 
     /// Check if the cipher is an AEAD cipher.
     pub fn is_aead(&self) -> bool {
-        matches!(
-            self.method,
-            Method::Aes128Gcm
-                | Method::Aes192Gcm
-                | Method::Aes256Gcm
-                | Method::ChaCha20Poly1305
-                | Method::ChaCha20IetfPoly1305
-                | Method::XChaCha20IetfPoly1305
-                | Method::Blake3Aes128Gcm
-                | Method::Blake3Aes256Gcm
-                | Method::Blake3ChaCha20Poly1305
-        )
+        is_aead(&self.method)
     }
 
     /// Check if the cipher is a 2022 AEAD cipher.
@@ -667,20 +723,19 @@ impl Cipher {
     /// Reset the cipher.
     #[must_use]
     pub fn reset(&self) -> Cipher {
-        let mut encrypt_prefix = vec![0u8; self.prefix_len];
-        rand::fill(&mut encrypt_prefix[..]);
-        // Never seed the decrypt IV/salt from the *old* `encrypt_prefix`
-        // (all zeros for a freshly built cipher): that silently made every UDP
-        // packet use an all-zero salt. The real value comes from the wire frame
+        // Never seed the decrypt seed from the *old* encrypt seed (all zeros
+        // for a freshly built cipher): that silently made every UDP packet use
+        // an all-zero salt. The real value comes from the wire frame
         // (`CipherStream`) or from the UDP datagram header.
-        let mut decrypt_prefix = vec![0u8; self.prefix_len];
-        rand::fill(&mut decrypt_prefix[..]);
+        let mut encrypt_seed = self.encrypt_seed.zeroed_like();
+        rand::fill(encrypt_seed.as_mut_bytes());
+        let mut decrypt_seed = self.decrypt_seed.zeroed_like();
+        rand::fill(decrypt_seed.as_mut_bytes());
 
         Cipher {
             key: self.key.clone(),
-            encrypt_prefix,
-            decrypt_prefix,
-            prefix_len: self.prefix_len,
+            encrypt_seed,
+            decrypt_seed,
             key_len: self.key_len,
             encrypt: None,
             decrypt: None,
