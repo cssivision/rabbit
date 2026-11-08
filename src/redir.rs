@@ -9,7 +9,7 @@ use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
-use awak::time::timeout;
+use awak::time::{interval, timeout};
 use awak::util::{copy_bidirectional, IdleTimeout};
 use bytes::BytesMut;
 use futures_channel::mpsc::{channel, Receiver, Sender};
@@ -19,7 +19,6 @@ use socket2::SockAddr;
 use crate::cipher::Cipher;
 use crate::config::{self, Transport};
 use crate::listener;
-use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::udp2022::{PacketWindow, Udp2022};
 use crate::udp_legacy;
 use crate::util::generate_raw_addr;
@@ -30,6 +29,8 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_UDP_BUFFER_SIZE: usize = 65536;
 /// How long an AEAD-2022 UDP association is remembered per local peer.
 const DEFAULT_UDP2022_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
+/// How often idle associations are reaped even when no packet arrives.
+const DEFAULT_UDP_REAPER_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Client-side state of the AEAD-2022 UDP association with one peer.
 struct Udp2022Association {
@@ -49,6 +50,13 @@ impl Udp2022Sessions {
         Udp2022Sessions {
             sessions: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Drop associations that have been idle for longer than the timeout.
+    fn reap(&self) {
+        let mut sessions = self.sessions.lock().unwrap();
+        let now = Instant::now();
+        sessions.retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
     }
 
     /// Reserve the packet id of the next outgoing packet.
@@ -178,6 +186,20 @@ impl Service {
         let socket = listener::bind_udp(self.config.local_addr)?;
         log::info!("listening udp on {:?}", self.config.local_addr);
         let (sender, receiver) = channel(1024);
+        let sessions = Arc::new(Udp2022Sessions::new());
+
+        // Reap idle associations on a timer: a peer that goes away should not
+        // pin a replay window and counters forever on a quiet redir.
+        let reaper_sessions = Arc::clone(&sessions);
+        awak::spawn(async move {
+            let mut ticker = interval(DEFAULT_UDP_REAPER_INTERVAL);
+            loop {
+                ticker.tick().await;
+                reaper_sessions.reap();
+            }
+        })
+        .detach();
+
         let udp_relay = UdpRelay {
             buf: [0u8; MAX_UDP_BUFFER_SIZE],
             sender,
@@ -187,7 +209,7 @@ impl Service {
             cipher,
             server_addr: self.config.server_addr,
             redir_addr: self.config.redir_addr,
-            sessions: Arc::new(Udp2022Sessions::new()),
+            sessions,
         };
         udp_relay.await
     }

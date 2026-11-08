@@ -9,7 +9,7 @@ use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
-use awak::time::timeout;
+use awak::time::{interval, timeout};
 use awak::util::{copy_bidirectional, IdleTimeout};
 use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures_util::{future::join, AsyncRead, AsyncReadExt, AsyncWrite, Stream, StreamExt};
@@ -34,6 +34,8 @@ const DEFAULT_UDP2022_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long an idle outbound UDP flow keeps its socket.
 const DEFAULT_UDP_FLOW_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_UDP_NAT_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+/// How often idle flows and sessions are reaped even when no traffic arrives.
+const DEFAULT_UDP_REAPER_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Per client-session state for AEAD-2022 UDP.
 ///
@@ -41,7 +43,12 @@ const DEFAULT_UDP_NAT_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// every response with an increasing packet id, so the server has to remember
 /// both for the lifetime of the session.
 struct Udp2022Sessions {
-    sessions: Mutex<HashMap<u64, Udp2022Session>>,
+    inner: Mutex<Udp2022SessionsInner>,
+}
+
+struct Udp2022SessionsInner {
+    sessions: HashMap<u64, Udp2022Session>,
+    last_sweep: Instant,
 }
 
 struct Udp2022Session {
@@ -54,16 +61,27 @@ struct Udp2022Session {
 impl Udp2022Sessions {
     fn new() -> Udp2022Sessions {
         Udp2022Sessions {
-            sessions: Mutex::new(HashMap::new()),
+            inner: Mutex::new(Udp2022SessionsInner {
+                sessions: HashMap::new(),
+                last_sweep: Instant::now(),
+            }),
         }
+    }
+
+    /// Drop sessions that have been idle for longer than the timeout. Called by
+    /// the reaper so state does not pile up while the relay is quiet.
+    fn reap(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.sweep(Instant::now());
     }
 
     /// Look up (or create) the session for `client_session_id` and check the
     /// packet id against the replay window. Returns `false` for replays.
     fn accept(&self, client_session_id: u64, packet_id: u64) -> bool {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         let now = Instant::now();
-        sessions.retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
+        inner.sweep_if_due(now);
+        let sessions = &mut inner.sessions;
 
         let session = sessions
             .entry(client_session_id)
@@ -82,9 +100,10 @@ impl Udp2022Sessions {
     /// response. The packet id is incremented before use, so the first
     /// response carries 1.
     fn next(&self, client_session_id: u64) -> (u64, u64) {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         let now = Instant::now();
-        sessions.retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
+        inner.sweep_if_due(now);
+        let sessions = &mut inner.sessions;
 
         let session = sessions
             .entry(client_session_id)
@@ -99,6 +118,20 @@ impl Udp2022Sessions {
         let packet_id = session.next_packet_id;
         session.next_packet_id = session.next_packet_id.wrapping_add(1);
         (session.server_session_id, packet_id)
+    }
+}
+
+impl Udp2022SessionsInner {
+    fn sweep(&mut self, now: Instant) {
+        self.sessions
+            .retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
+        self.last_sweep = now;
+    }
+
+    fn sweep_if_due(&mut self, now: Instant) {
+        if now.duration_since(self.last_sweep) >= DEFAULT_UDP_NAT_SWEEP_INTERVAL {
+            self.sweep(now);
+        }
     }
 }
 
@@ -213,6 +246,20 @@ struct UdpNat {
     state: Mutex<UdpNatState>,
 }
 
+impl UdpNatState {
+    fn sweep(&mut self, now: Instant) {
+        self.entries
+            .retain(|_, e| now.duration_since(e.last_seen) < DEFAULT_UDP_FLOW_TIMEOUT);
+        self.last_sweep = now;
+    }
+
+    fn sweep_if_due(&mut self, now: Instant) {
+        if now.duration_since(self.last_sweep) >= DEFAULT_UDP_NAT_SWEEP_INTERVAL {
+            self.sweep(now);
+        }
+    }
+}
+
 impl UdpNat {
     fn new() -> UdpNat {
         UdpNat {
@@ -221,6 +268,14 @@ impl UdpNat {
                 last_sweep: Instant::now(),
             }),
         }
+    }
+
+    /// Drop flows that have been idle for longer than the timeout. Dropping
+    /// the entry closes the flow channel, which ends the flow task and frees
+    /// its socket.
+    fn reap(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.sweep(Instant::now());
     }
 
     /// Hand `payload` to the flow for `key`, creating the flow on first use.
@@ -234,12 +289,7 @@ impl UdpNat {
     ) {
         let mut state = self.state.lock().unwrap();
         let now = Instant::now();
-        if now.duration_since(state.last_sweep) >= DEFAULT_UDP_NAT_SWEEP_INTERVAL {
-            state
-                .entries
-                .retain(|_, e| now.duration_since(e.last_seen) < DEFAULT_UDP_FLOW_TIMEOUT);
-            state.last_sweep = now;
-        }
+        state.sweep_if_due(now);
 
         if let Some(entry) = state.entries.get_mut(&key) {
             entry.last_seen = now;
@@ -406,12 +456,29 @@ struct UdpRelay {
     recv: Option<(Vec<u8>, SocketAddr)>,
     cipher: Cipher,
     sessions: Arc<Udp2022Sessions>,
-    nat: UdpNat,
+    nat: Arc<UdpNat>,
 }
 
 impl UdpRelay {
     fn new(socket: UdpSocket, cipher: Cipher) -> UdpRelay {
         let (sender, receiver) = unbounded();
+        let sessions = Arc::new(Udp2022Sessions::new());
+        let nat = Arc::new(UdpNat::new());
+
+        // Reap idle flows and sessions on a timer: waiting for the next packet
+        // would keep sockets and replay windows alive forever on a quiet relay.
+        let reaper_nat = Arc::clone(&nat);
+        let reaper_sessions = Arc::clone(&sessions);
+        awak::spawn(async move {
+            let mut ticker = interval(DEFAULT_UDP_REAPER_INTERVAL);
+            loop {
+                ticker.tick().await;
+                reaper_nat.reap();
+                reaper_sessions.reap();
+            }
+        })
+        .detach();
+
         UdpRelay {
             buf: [0u8; MAX_UDP_BUFFER_SIZE],
             sender,
@@ -419,8 +486,8 @@ impl UdpRelay {
             socket,
             recv: None,
             cipher,
-            sessions: Arc::new(Udp2022Sessions::new()),
-            nat: UdpNat::new(),
+            sessions,
+            nat,
         }
     }
 
@@ -590,4 +657,84 @@ where
     buf[0] = address_type[0];
     conn.read_exact(&mut buf[1..]).await?;
     parse_socks_addr(&buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key() -> UdpKey {
+        (
+            "127.0.0.1:1234".parse().unwrap(),
+            "example.com".to_string(),
+            443,
+            0,
+        )
+    }
+
+    fn expired() -> Instant {
+        Instant::now() - DEFAULT_UDP_FLOW_TIMEOUT - Duration::from_secs(1)
+    }
+
+    #[test]
+    fn reaper_drops_idle_flows() {
+        let nat = UdpNat::new();
+        let (tx, _rx) = unbounded();
+        {
+            let mut state = nat.state.lock().unwrap();
+            state.entries.insert(
+                key(),
+                UdpEntry {
+                    sender: tx,
+                    last_seen: expired(),
+                },
+            );
+        }
+
+        nat.reap();
+
+        assert!(nat.state.lock().unwrap().entries.is_empty());
+    }
+
+    #[test]
+    fn reaper_keeps_active_flows() {
+        let nat = UdpNat::new();
+        let (tx, _rx) = unbounded();
+        nat.state.lock().unwrap().entries.insert(
+            key(),
+            UdpEntry {
+                sender: tx,
+                last_seen: Instant::now(),
+            },
+        );
+
+        nat.reap();
+
+        assert_eq!(nat.state.lock().unwrap().entries.len(), 1);
+    }
+
+    #[test]
+    fn reaper_drops_idle_sessions() {
+        let sessions = Udp2022Sessions::new();
+        assert!(sessions.accept(7, 1));
+        {
+            let mut inner = sessions.inner.lock().unwrap();
+            inner.sessions.get_mut(&7).unwrap().last_seen = expired();
+        }
+
+        sessions.reap();
+
+        assert!(sessions.inner.lock().unwrap().sessions.is_empty());
+        // A later packet from the same client starts a fresh session.
+        assert!(sessions.accept(7, 1));
+    }
+
+    #[test]
+    fn session_sweep_keeps_recent_packets_filtered() {
+        let sessions = Udp2022Sessions::new();
+        assert!(sessions.accept(1, 1));
+        assert!(!sessions.accept(1, 1));
+        sessions.reap();
+        assert!(!sessions.accept(1, 1), "replay must stay rejected");
+    }
 }
