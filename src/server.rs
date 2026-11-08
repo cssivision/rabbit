@@ -2,9 +2,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::pin::Pin;
-use std::str;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
@@ -21,7 +20,7 @@ use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::udp2022::{PacketWindow, Udp2022};
-use crate::util::generate_raw_addr;
+use crate::udp_legacy;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
@@ -377,22 +376,18 @@ async fn udp_reply_loop(
                 }
             }
             None => {
-                // A datagram is self-contained, so every reply carries its own
-                // fresh salt/IV and the destination address.
-                let mut cipher = cipher.reset();
-                cipher.init_encrypt();
-                let seed_len = cipher.seed_len();
-                let mut data = cipher.encrypt_seed().as_bytes().to_vec();
-                data.extend_from_slice(&generate_raw_addr(&target.ip().to_string(), target.port()));
-                data.extend_from_slice(&recv_buf[..n]);
-                if cipher.is_aead() {
-                    data.extend_from_slice(&vec![0u8; cipher.tag_size()]);
+                match udp_legacy::seal(
+                    &cipher,
+                    &target.ip().to_string(),
+                    target.port(),
+                    &recv_buf[..n],
+                ) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        log::error!("udp flow encrypt failed: {}", e);
+                        return;
+                    }
                 }
-                if let Err(e) = cipher.encrypt_in_place(&mut data[seed_len..]) {
-                    log::error!("udp flow encrypt failed: {}", e);
-                    return;
-                }
-                data
             }
         };
 
@@ -461,12 +456,12 @@ impl Future for UdpRelay {
                 Poll::Ready(v) => {
                     let (n, peer_addr) = v?;
                     log::info!("recv {} byte from {:?}", n, peer_addr);
-                    let mut buf = me.buf[..n].to_vec();
+                    let buf = me.buf[..n].to_vec();
                     let mut cipher = me.cipher.reset();
                     let decoded = if cipher.is_aead2022() {
                         decode_2022(&cipher, &buf, &me.sessions)
                     } else {
-                        decode_legacy(&mut cipher, &mut buf)
+                        decode_legacy(&mut cipher, &buf)
                     };
                     match decoded {
                         Ok((host, port, session, payload)) => {
@@ -483,39 +478,9 @@ impl Future for UdpRelay {
 }
 
 /// Decrypt a legacy (pre-SIP022) datagram and return its destination.
-fn decode_legacy(
-    cipher: &mut Cipher,
-    buf: &mut Vec<u8>,
-) -> io::Result<(String, u16, u64, Vec<u8>)> {
-    let seed_len = cipher.seed_len();
-    if buf.len() < seed_len {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "UnexpectedEof",
-        ));
-    }
-    cipher
-        .decrypt_seed_mut()
-        .as_mut_bytes()
-        .copy_from_slice(&buf[..seed_len]);
-    cipher.init_decrypt();
-    buf.drain(..seed_len);
-
-    cipher.decrypt_in_place(buf)?;
-    if cipher.is_aead() {
-        let tag = cipher.tag_size();
-        if buf.len() < tag {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "truncated tag",
-            ));
-        }
-        buf.truncate(buf.len() - tag);
-    }
-
-    let (n, host, port) = parse_socks_addr(buf)?;
-    buf.drain(..n);
-    Ok((host, port, 0, std::mem::take(buf)))
+fn decode_legacy(cipher: &mut Cipher, buf: &[u8]) -> io::Result<(String, u16, u64, Vec<u8>)> {
+    let (host, port, payload) = udp_legacy::open(cipher, buf)?;
+    Ok((host, port, 0, payload))
 }
 
 /// Decrypt a SIP022 datagram and check its packet id for replays.
@@ -598,58 +563,7 @@ where
 /// Parse a SOCKS5 address at the start of `buf`, returning its length, host and
 /// port.
 fn parse_socks_addr(buf: &[u8]) -> io::Result<(usize, String, u16)> {
-    let atyp = match buf.first() {
-        Some(atyp) => *atyp,
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "empty address",
-            ))
-        }
-    };
-    match atyp {
-        TYPE_IPV4 => {
-            if buf.len() < 7 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short ipv4"));
-            }
-            let addr = Ipv4Addr::new(buf[1], buf[2], buf[3], buf[4]);
-            let port = u16::from_be_bytes([buf[5], buf[6]]);
-            Ok((7, format!("{addr}"), port))
-        }
-        TYPE_IPV6 => {
-            if buf.len() < 19 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short ipv6"));
-            }
-            let a = u16::from_be_bytes([buf[1], buf[2]]);
-            let b = u16::from_be_bytes([buf[3], buf[4]]);
-            let c = u16::from_be_bytes([buf[5], buf[6]]);
-            let d = u16::from_be_bytes([buf[7], buf[8]]);
-            let e = u16::from_be_bytes([buf[9], buf[10]]);
-            let f = u16::from_be_bytes([buf[11], buf[12]]);
-            let g = u16::from_be_bytes([buf[13], buf[14]]);
-            let h = u16::from_be_bytes([buf[15], buf[16]]);
-            let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
-            let port = u16::from_be_bytes([buf[17], buf[18]]);
-            Ok((19, format!("{addr}"), port))
-        }
-        TYPE_DOMAIN => {
-            if buf.len() < 2 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short domain"));
-            }
-            let len = buf[1] as usize;
-            if buf.len() < 2 + len + 2 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short domain"));
-            }
-            let hostname = str::from_utf8(&buf[2..2 + len])
-                .map_err(|_| io::Error::other("hostname include invalid utf8"))?;
-            let port = u16::from_be_bytes([buf[2 + len], buf[3 + len]]);
-            Ok((2 + len + 2, hostname.to_string(), port))
-        }
-        n => {
-            log::error!("unknown address type, received: {:?}", n);
-            Err(io::Error::other("unknown address type, received"))
-        }
-    }
+    udp_legacy::parse_address(buf)
 }
 
 async fn get_addr_info<A>(conn: &mut A) -> io::Result<(usize, String, u16)>

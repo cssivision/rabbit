@@ -9,6 +9,7 @@ pub mod resolver;
 pub mod server;
 pub mod socks5;
 pub mod udp2022;
+pub mod udp_legacy;
 pub mod util;
 
 use std::io;

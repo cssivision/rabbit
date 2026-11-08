@@ -21,6 +21,7 @@ use crate::config::{self, Transport};
 use crate::listener;
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::udp2022::{PacketWindow, Udp2022};
+use crate::udp_legacy;
 use crate::util::generate_raw_addr;
 use crate::CipherStream;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
@@ -333,12 +334,12 @@ async fn proxy_packet(
         )
         .await;
     }
-    cipher.init_encrypt();
-    let mut data = cipher.encrypt_seed().as_bytes().to_vec();
-    let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
-    data.extend_from_slice(&rawaddr);
-    data.extend_from_slice(&buf);
-    cipher.encrypt_in_place(&mut data[cipher.seed_len()..])?;
+    let data = udp_legacy::seal(
+        &mut cipher,
+        &redir_addr.ip().to_string(),
+        redir_addr.port(),
+        &buf,
+    )?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
@@ -349,44 +350,10 @@ async fn proxy_packet(
     let n = socket.recv(&mut recv_buf).await?;
     recv_buf.truncate(n);
 
-    // The server prefixes each UDP response with its own salt/IV.
-    let seed_len = cipher.seed_len();
-    if n < seed_len {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "udp response shorter than salt",
-        ));
-    }
-    cipher
-        .decrypt_seed_mut()
-        .as_mut_bytes()
-        .copy_from_slice(&recv_buf[..seed_len]);
-    cipher.init_decrypt();
-    recv_buf.drain(..seed_len);
-    cipher.decrypt_in_place(&mut recv_buf)?;
-    // AEAD keeps the authentication tag at the end of the buffer; it is not
-    // part of the payload that goes back to the application.
-    if cipher.is_aead() {
-        let tag = cipher.tag_size();
-        if recv_buf.len() >= tag {
-            recv_buf.truncate(recv_buf.len() - tag);
-        }
-    }
-
-    // Strip the SOCKS5 address prefix that the server's response body starts with.
-    if let Some(atyp) = recv_buf.first().copied() {
-        let skip = match atyp {
-            TYPE_IPV4 => 1 + 4 + 2,
-            TYPE_IPV6 => 1 + 16 + 2,
-            TYPE_DOMAIN => 2 + recv_buf.get(1).copied().unwrap_or(0) as usize + 2,
-            _ => 0,
-        };
-        if skip > 0 && recv_buf.len() >= skip {
-            recv_buf.drain(..skip);
-        }
-    }
+    // The response is framed like a request: seed, source address, payload.
+    let (_, _, payload) = udp_legacy::open(&mut cipher, &recv_buf[..n])?;
     sender
-        .try_send((recv_buf.to_vec(), peer_addr))
+        .try_send((payload, peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
