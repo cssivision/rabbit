@@ -46,8 +46,8 @@ compatible with rabbit versions before the 2022 UDP work**:
   session id and packet id, a per-session subkey and a replay window
   (`2022-blake3-chacha20-poly1305` puts the nonce in front instead).
 
-The server side has been tested against shadowsocks-rust (`sslocal`) and
-sing-box for all three 2022 methods over UDP.
+The server side has been tested against other shadowsocks implementations for
+all three 2022 methods over UDP.
 
 # Supported ciphers
 

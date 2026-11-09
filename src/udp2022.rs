@@ -396,7 +396,7 @@ impl Udp2022 {
 }
 
 /// Sliding replay window over 64-bit packet ids, same shape as the WireGuard
-/// counter window used by shadowsocks-rust.
+/// counter window.
 pub struct PacketWindow {
     last: u64,
     ring: [u64; RING_BLOCKS as usize],

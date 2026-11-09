@@ -521,10 +521,10 @@ where
         let buf = &buf[..buf.len().min(max_payload)];
         let writer = &mut me.writer;
         // The first encrypted chunk must carry the seed as a prefix, in the same
-        // write: clients such as shadowsocks-rust read the whole header chunk
-        // (seed included) with a single read call. This is known before any state
-        // changes, and the first call always reaches the encrypt step below
-        // because `cap` stays 0 until a chunk has been built.
+        // write: peers read the whole header chunk (seed included) with a
+        // single read call. This is known before any state changes, and the
+        // first call always reaches the encrypt step below because `cap` stays
+        // 0 until a chunk has been built.
         let first_chunk = !writer.inited;
 
         loop {

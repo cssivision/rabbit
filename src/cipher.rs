@@ -785,8 +785,8 @@ impl Cipher {
 
     /// Largest payload that fits in one encrypted record.
     ///
-    /// The length field is a u16, but shadowsocks-rust only accepts records up
-    /// to 0x3fff for the AEAD ciphers, so stay within that bound.
+    /// The length field is a u16, but the AEAD protocols only accept records up
+    /// to 0x3fff, so stay within that bound.
     pub fn max_payload_size(&self) -> usize {
         if self.is_aead2022() {
             0xffff
