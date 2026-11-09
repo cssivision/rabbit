@@ -15,13 +15,14 @@ pub mod util;
 use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
 use bytes::{BufMut, BytesMut};
 use futures_util::{AsyncRead, AsyncWrite};
 
 use cipher::Cipher;
+use util::COPY_BUFFER_SIZE;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 pub const DEFAULT_CHECK_INTERVAL: Duration = Duration::from_secs(3);
@@ -478,7 +479,15 @@ where
                 }
                 None => {
                     read_buf.clear();
-                    let n = ready!(poll_read_uninit(&mut *stream, cx, read_buf, 4096))?;
+                    // Stream ciphers put no framing on the wire, so reading a
+                    // large chunk costs nothing extra and keeps the relay from
+                    // copying 4 KiB at a time.
+                    let n = ready!(poll_read_uninit(
+                        &mut *stream,
+                        cx,
+                        read_buf,
+                        COPY_BUFFER_SIZE
+                    ))?;
                     if n == 0 {
                         return Poll::Ready(Ok(0));
                     }
@@ -521,9 +530,9 @@ where
         loop {
             // If our buffer has some data, let's write it out!
             while writer.pos < writer.cap {
-                let i =
-                    ready!(Pin::new(&mut me.stream)
-                        .poll_write(cx, &writer.buf[writer.pos..writer.cap]))?;
+                let i = ready!(
+                    Pin::new(&mut me.stream).poll_write(cx, &writer.buf[writer.pos..writer.cap])
+                )?;
                 if i == 0 {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::WriteZero,

@@ -25,7 +25,7 @@ pub fn parse_address(buf: &[u8]) -> io::Result<(usize, String, u16)> {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "empty address",
-            ))
+            ));
         }
     };
     match atyp {

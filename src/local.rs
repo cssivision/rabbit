@@ -4,16 +4,16 @@ use std::time::Duration;
 
 use awak::net::TcpStream;
 use awak::time::timeout;
-use awak::util::{copy_bidirectional_with_buffer_size, IdleTimeout};
+use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
 use bytes::BytesMut;
 use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
+use crate::CipherStream;
 use crate::cipher::Cipher;
 use crate::config;
 use crate::listener::Listener;
 use crate::socks5;
-use crate::util::{generate_raw_addr, COPY_BUFFER_SIZE};
-use crate::CipherStream;
+use crate::util::{COPY_BUFFER_SIZE, generate_raw_addr};
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);

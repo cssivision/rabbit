@@ -59,7 +59,7 @@ where
         // This some round trip time for creating socks connection with the client.
         // But if connection failed, the client will get connection reset error.
 
-        let result = match address_type.first() {
+        match address_type.first() {
             // For IPv4 addresses, we read the 4 bytes for the address as
             // well as 2 bytes for the port.
             Some(&v5::TYPE_IPV4) => {
@@ -127,8 +127,7 @@ where
                 let msg = format!("unknown address type, received: {n:?}");
                 Err(io::Error::other(msg))
             }
-        };
-        result
+        }
     };
     timeout(dur, fut).await?
 }

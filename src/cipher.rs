@@ -2,16 +2,12 @@ use std::convert::TryFrom;
 use std::io;
 
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::aead::{inout::InOutBuf, AeadInOut, Nonce, Tag};
+use aes_gcm::aead::{AeadInOut, Tag, inout::InOutBuf};
+use aws_lc_rs::aead::{Aad, Algorithm, LessSafeKey, Nonce as RawNonce, UnboundKey};
 use base64::Engine;
 use camellia::{Camellia128, Camellia192, Camellia256};
-use cipher::{
-    array::Array,
-    consts::{U12, U8},
-    BlockCipherEncrypt, Key, KeyInit, KeyIvInit, StreamCipher,
-};
+use cipher::{BlockCipherEncrypt, KeyInit, KeyIvInit, StreamCipher, array::Array, consts::U8};
 use ctr::Ctr128BE;
-use ring::aead::{Aad, Algorithm, LessSafeKey, Nonce as RawNonce, UnboundKey};
 
 use serde::{Deserialize, Serialize};
 
@@ -53,9 +49,6 @@ type Aes128Ctr = Ctr128BE<Aes128>;
 type Aes192Ctr = Ctr128BE<Aes192>;
 /// AES-256 CTR mode cipher.
 type Aes256Ctr = Ctr128BE<Aes256>;
-
-/// AES-192 GCM mode cipher.
-type Aes192Gcm = AesGcm<aes_gcm::AesGcm<aes::Aes192, U12>>;
 
 // ChaCha20 is a type alias for ChaCha20Legacy
 type ChaCha20 = chacha20::ChaCha20Legacy;
@@ -164,31 +157,31 @@ impl CipherCore for Salsa20 {
     }
 }
 
-/// AEAD engine backed by *ring*.
+/// AEAD engine backed by AWS-LC.
 ///
-/// *ring* ships hand-written assembly for AES-GCM and ChaCha20-Poly1305, which
+/// AWS-LC ships hand-written assembly for AES-GCM and ChaCha20-Poly1305, which
 /// is several times faster than the portable RustCrypto implementation it
 /// replaces. The record format is unchanged.
-struct NativeAead {
+struct AwsLcAead {
     key: LessSafeKey,
     nonce: Vec<u8>,
 }
 
-impl NativeAead {
-    fn new(algorithm: &'static Algorithm, key: &[u8]) -> NativeAead {
+impl AwsLcAead {
+    fn new(algorithm: &'static Algorithm, key: &[u8]) -> AwsLcAead {
         let key = UnboundKey::new(algorithm, key).expect("invalid AEAD key length");
-        NativeAead {
+        AwsLcAead {
             key: LessSafeKey::new(key),
             nonce: vec![0u8; 12],
         }
     }
 
     /// Legacy AEAD method: the session key is HKDF-SHA1(key, salt).
-    fn new_legacy(algorithm: &'static Algorithm, key: &[u8], salt: &[u8]) -> NativeAead {
+    fn new_legacy(algorithm: &'static Algorithm, key: &[u8], salt: &[u8]) -> AwsLcAead {
         let mut subkey = vec![0u8; key.len()];
         hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
             .expect("HKDF-SHA1 key derivation failed");
-        NativeAead::new(algorithm, &subkey)
+        AwsLcAead::new(algorithm, &subkey)
     }
 
     /// SIP022 method: the session key is the BLAKE3 XOF of key and seed.
@@ -197,9 +190,9 @@ impl NativeAead {
         key: &[u8],
         salt: &[u8],
         key_len: usize,
-    ) -> NativeAead {
+    ) -> AwsLcAead {
         let subkey = derive_blake3_subkey(key, salt);
-        NativeAead::new(algorithm, &subkey[..key_len])
+        AwsLcAead::new(algorithm, &subkey[..key_len])
     }
 
     fn nonce(&self) -> RawNonce {
@@ -209,7 +202,125 @@ impl NativeAead {
     }
 }
 
-impl CipherCore for NativeAead {
+/// Seal `buffer` in place with a one-off key and 96 bit nonce, appending the
+/// 16 byte authentication tag.
+///
+/// This is the stateless form of the same primitive `AwsLcAead` wraps. The
+/// AEAD-2022 UDP path needs it because every datagram derives a fresh session
+/// subkey from its session id, so there is no stream-scoped cipher to reuse.
+fn aead_seal(
+    algorithm: &'static Algorithm,
+    key: &[u8],
+    nonce: &[u8],
+    buffer: &mut Vec<u8>,
+) -> io::Result<()> {
+    let key = UnboundKey::new(algorithm, key)
+        .map_err(|e| io::Error::other(format!("invalid AEAD key length: {e:?}")))?;
+    let nonce = RawNonce::try_assume_unique_for_key(nonce)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
+    let tag = LessSafeKey::new(key)
+        .seal_in_place_separate_tag(nonce, Aad::empty(), buffer.as_mut_slice())
+        .map_err(|e| io::Error::other(format!("AEAD encryption failed: {e:?}")))?;
+    buffer.extend_from_slice(tag.as_ref());
+    Ok(())
+}
+
+/// Open `buffer` in place with a one-off key and 96 bit nonce, stripping the
+/// 16 byte authentication tag.
+///
+/// The plaintext stays at the front of `buffer`, which is truncated to its
+/// length.
+fn aead_open(
+    algorithm: &'static Algorithm,
+    key: &[u8],
+    nonce: &[u8],
+    buffer: &mut Vec<u8>,
+) -> io::Result<()> {
+    let key = UnboundKey::new(algorithm, key)
+        .map_err(|e| io::Error::other(format!("invalid AEAD key length: {e:?}")))?;
+    let nonce = RawNonce::try_assume_unique_for_key(nonce)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
+    let plaintext_len = LessSafeKey::new(key)
+        .open_in_place(nonce, Aad::empty(), buffer.as_mut_slice())
+        .map_err(|e| {
+            io::Error::other(format!(
+                "AEAD decryption failed (authentication failed): {e:?}"
+            ))
+        })?
+        .len();
+    buffer.truncate(plaintext_len);
+    Ok(())
+}
+
+/// Seal `buffer` in place with the per-packet AEAD of a SIP022 method,
+/// appending the 16 byte authentication tag.
+///
+/// AEAD-2022 derives a fresh session subkey for every datagram, so the caller
+/// only supplies the method, the subkey and the 96 bit nonce. The ChaCha20
+/// variant uses a 192 bit nonce and the pre-shared key directly, which is the
+/// one case AWS-LC cannot serve.
+pub fn udp_seal(method: Method, key: &[u8], nonce: &[u8], buffer: &mut Vec<u8>) -> io::Result<()> {
+    match method {
+        Method::Blake3Aes128Gcm => aead_seal(&aws_lc_rs::aead::AES_128_GCM, key, nonce, buffer),
+        Method::Blake3Aes256Gcm => aead_seal(&aws_lc_rs::aead::AES_256_GCM, key, nonce, buffer),
+        Method::Blake3ChaCha20Poly1305 => xchacha_seal(key, nonce, buffer),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{method:?} is not a 2022 AEAD method"),
+        )),
+    }
+}
+
+/// Open `buffer` in place with the per-packet AEAD of a SIP022 method,
+/// stripping the 16 byte authentication tag.
+pub fn udp_open(method: Method, key: &[u8], nonce: &[u8], buffer: &mut Vec<u8>) -> io::Result<()> {
+    match method {
+        Method::Blake3Aes128Gcm => aead_open(&aws_lc_rs::aead::AES_128_GCM, key, nonce, buffer),
+        Method::Blake3Aes256Gcm => aead_open(&aws_lc_rs::aead::AES_256_GCM, key, nonce, buffer),
+        Method::Blake3ChaCha20Poly1305 => xchacha_open(key, nonce, buffer),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{method:?} is not a 2022 AEAD method"),
+        )),
+    }
+}
+
+/// Seal `buffer` in place with a one-off key and 192 bit nonce
+/// (XChaCha20-Poly1305), appending the 16 byte authentication tag.
+///
+/// AWS-LC has no XChaCha20, so this is the one AEAD-2022 path that stays on
+/// RustCrypto.
+fn xchacha_seal(key: &[u8], nonce: &[u8], buffer: &mut Vec<u8>) -> io::Result<()> {
+    use aes_gcm::aead::{AeadInOut, Buffer};
+
+    let cipher = chacha20poly1305::XChaCha20Poly1305::new_from_slice(key)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let nonce = chacha20poly1305::XNonce::try_from(nonce)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
+    cipher
+        .encrypt_in_place(&nonce, &[], buffer as &mut dyn Buffer)
+        .map_err(|e| io::Error::other(format!("AEAD encryption failed: {e}")))
+}
+
+/// Open `buffer` in place with a one-off key and 192 bit nonce
+/// (XChaCha20-Poly1305), stripping the 16 byte authentication tag.
+fn xchacha_open(key: &[u8], nonce: &[u8], buffer: &mut Vec<u8>) -> io::Result<()> {
+    use aes_gcm::aead::{AeadInOut, Buffer};
+
+    let cipher = chacha20poly1305::XChaCha20Poly1305::new_from_slice(key)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let nonce = chacha20poly1305::XNonce::try_from(nonce)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
+    cipher
+        .decrypt_in_place(&nonce, &[], buffer as &mut dyn Buffer)
+        .map_err(|e| {
+            io::Error::other(format!(
+                "AEAD decryption failed (authentication failed): {e}"
+            ))
+        })
+}
+
+impl CipherCore for AwsLcAead {
     /// Encrypt data in place, writing the detached tag into the reserved tail.
     fn encrypt_in_place(&mut self, data: &mut [u8]) -> io::Result<()> {
         if data.len() < 16 {
@@ -249,14 +360,6 @@ impl CipherCore for NativeAead {
     }
 }
 
-struct AesGcm<G>
-where
-    G: AeadInOut + KeyInit,
-{
-    inner: G,
-    nonce: Vec<u8>,
-}
-
 fn increment_nonce(nonce: &mut [u8]) {
     for byte in nonce.iter_mut() {
         *byte = byte.wrapping_add(1);
@@ -266,7 +369,10 @@ fn increment_nonce(nonce: &mut [u8]) {
     }
 }
 
-/// Shared AEAD encrypt/decrypt implementation to avoid repetition across AEAD ciphers.
+/// Shared AEAD encrypt/decrypt implementation for the RustCrypto backends.
+///
+/// Only the ciphers AWS-LC does not provide go through this: the 8 byte nonce
+/// ChaCha20-Poly1305 variant and XChaCha20-Poly1305.
 macro_rules! impl_aead_methods {
     ($make_nonce:expr, $tag_ty:ty) => {
         /// Encrypt data in place. Buffer must reserve 16 bytes for the authentication tag.
@@ -332,33 +438,6 @@ macro_rules! impl_aead_methods {
             Ok(())
         }
     };
-}
-
-impl<G> AesGcm<G>
-where
-    G: AeadInOut + KeyInit,
-{
-    fn new(key: &[u8], salt: &[u8]) -> AesGcm<G> {
-        // Use HKDF-SHA1 to derive subkey from key and salt
-        let mut subkey = vec![0u8; key.len()];
-        hkdf_sha1(key, salt, AEAD_SUBKEY_INFO, &mut subkey)
-            .expect("HKDF-SHA1 key derivation failed");
-        let key = Key::<G>::try_from(subkey.as_slice()).expect("invalid AEAD key length");
-        AesGcm {
-            inner: G::new(&key),
-            nonce: vec![0u8; 12],
-        }
-    }
-}
-
-impl<G> CipherCore for AesGcm<G>
-where
-    G: AeadInOut + KeyInit + Send + Sync + 'static,
-{
-    impl_aead_methods!(
-        |n| Nonce::<G>::try_from(n).expect("invalid nonce length"),
-        G
-    );
 }
 
 struct ChaCha20Poly1305 {
@@ -597,12 +676,12 @@ impl Cipher {
 
     /// Initialize the encryption cipher from the current encrypt seed.
     pub fn init_encrypt(&mut self) {
-        self.encrypt = Some(self.gen(self.encrypt_seed.as_bytes()));
+        self.encrypt = Some(self.make_core(self.encrypt_seed.as_bytes()));
     }
 
     /// Initialize the decryption cipher from the current decrypt seed.
     pub fn init_decrypt(&mut self) {
-        self.decrypt = Some(self.gen(self.decrypt_seed.as_bytes()));
+        self.decrypt = Some(self.make_core(self.decrypt_seed.as_bytes()));
     }
 
     /// Seed that opens an outgoing stream: a salt for AEAD methods, an IV for
@@ -632,7 +711,7 @@ impl Cipher {
         self.encrypt_seed.as_bytes().len()
     }
 
-    fn gen(&self, seed: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
+    fn make_core(&self, seed: &[u8]) -> Box<dyn CipherCore + Send + Sync + 'static> {
         let key: &[u8] = &self.key;
         match self.method {
             Method::Aes128Cfb => Box::new(Aes128Cfb::new(key, seed)),
@@ -659,35 +738,43 @@ impl Cipher {
             Method::Salsa20 => {
                 Box::new(Salsa20::new_from_slices(key, seed).expect("invalid Salsa20 key/iv"))
             }
-            Method::Blake3Aes128Gcm => Box::new(NativeAead::new_blake3(
-                &ring::aead::AES_128_GCM,
+            Method::Blake3Aes128Gcm => Box::new(AwsLcAead::new_blake3(
+                &aws_lc_rs::aead::AES_128_GCM,
                 key,
                 seed,
                 16,
             )),
-            Method::Blake3Aes256Gcm => Box::new(NativeAead::new_blake3(
-                &ring::aead::AES_256_GCM,
+            Method::Blake3Aes256Gcm => Box::new(AwsLcAead::new_blake3(
+                &aws_lc_rs::aead::AES_256_GCM,
                 key,
                 seed,
                 32,
             )),
-            Method::Blake3ChaCha20Poly1305 => Box::new(NativeAead::new_blake3(
-                &ring::aead::CHACHA20_POLY1305,
+            Method::Blake3ChaCha20Poly1305 => Box::new(AwsLcAead::new_blake3(
+                &aws_lc_rs::aead::CHACHA20_POLY1305,
                 key,
                 seed,
                 32,
             )),
             // AEAD methods treat the seed as a salt
-            Method::Aes128Gcm => {
-                Box::new(NativeAead::new_legacy(&ring::aead::AES_128_GCM, key, seed))
-            }
-            Method::Aes192Gcm => Box::new(Aes192Gcm::new(key, seed)),
-            Method::Aes256Gcm => {
-                Box::new(NativeAead::new_legacy(&ring::aead::AES_256_GCM, key, seed))
-            }
+            Method::Aes128Gcm => Box::new(AwsLcAead::new_legacy(
+                &aws_lc_rs::aead::AES_128_GCM,
+                key,
+                seed,
+            )),
+            Method::Aes192Gcm => Box::new(AwsLcAead::new_legacy(
+                &aws_lc_rs::aead::AES_192_GCM,
+                key,
+                seed,
+            )),
+            Method::Aes256Gcm => Box::new(AwsLcAead::new_legacy(
+                &aws_lc_rs::aead::AES_256_GCM,
+                key,
+                seed,
+            )),
             Method::ChaCha20Poly1305 => Box::new(ChaCha20Poly1305::new(key, seed)),
-            Method::ChaCha20IetfPoly1305 => Box::new(NativeAead::new_legacy(
-                &ring::aead::CHACHA20_POLY1305,
+            Method::ChaCha20IetfPoly1305 => Box::new(AwsLcAead::new_legacy(
+                &aws_lc_rs::aead::CHACHA20_POLY1305,
                 key,
                 seed,
             )),
@@ -711,11 +798,7 @@ impl Cipher {
     }
 
     pub fn tag_size(&self) -> usize {
-        if self.is_aead() {
-            16
-        } else {
-            0
-        }
+        if self.is_aead() { 16 } else { 0 }
     }
 
     /// Check if the cipher is an AEAD cipher.

@@ -5,24 +5,24 @@ use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
-use awak::util::{copy_bidirectional_with_buffer_size, IdleTimeout};
+use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
 use bytes::BytesMut;
-use futures_channel::mpsc::{channel, Receiver, Sender};
-use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
+use futures_channel::mpsc::{Receiver, Sender, channel};
+use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt, Stream, future::join};
 use socket2::SockAddr;
 
+use crate::CipherStream;
 use crate::cipher::Cipher;
 use crate::config::{self, Transport};
 use crate::listener;
-use crate::udp2022::{PacketWindow, Udp2022};
 use crate::udp_legacy;
-use crate::util::{generate_raw_addr, COPY_BUFFER_SIZE};
-use crate::CipherStream;
+use crate::udp2022::{PacketWindow, Udp2022};
+use crate::util::{COPY_BUFFER_SIZE, generate_raw_addr};
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -106,11 +106,7 @@ fn random_session_id() -> u64 {
     let mut buf = [0u8; 8];
     rand::fill(&mut buf[..]);
     let id = u64::from_be_bytes(buf);
-    if id == 0 {
-        1
-    } else {
-        id
-    }
+    if id == 0 { 1 } else { id }
 }
 
 pub struct Server {
@@ -357,7 +353,7 @@ async fn proxy_packet(
         .await;
     }
     let data = udp_legacy::seal(
-        &mut cipher,
+        &cipher,
         &redir_addr.ip().to_string(),
         redir_addr.port(),
         &buf,

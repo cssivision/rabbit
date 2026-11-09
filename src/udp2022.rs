@@ -15,6 +15,7 @@
 //!
 //! See https://shadowsocks.org/doc/sip022.html.
 
+use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -22,13 +23,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use aes::{Aes128, Aes256, Block};
-use aes_gcm::aead::{AeadInOut, Buffer};
-use cipher::{
-    array::Array,
-    consts::{U12, U24},
-};
 
-use crate::cipher::Method;
+use crate::cipher::{Method, udp_open, udp_seal};
 use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
 use crate::util::{derive_blake3_subkey, generate_raw_addr};
 
@@ -96,6 +92,7 @@ impl UdpAead {
 
 /// 2022 UDP cipher state: the pre-shared key plus the method.
 pub struct Udp2022 {
+    method: Method,
     aead: UdpAead,
     psk: Vec<u8>,
 }
@@ -115,6 +112,7 @@ impl Udp2022 {
             ));
         }
         Ok(Udp2022 {
+            method,
             aead,
             psk: psk.to_vec(),
         })
@@ -127,38 +125,30 @@ impl Udp2022 {
         key
     }
 
+    /// Key that seals one packet.
+    ///
+    /// The ChaCha20 method seals with the pre-shared key itself and carries a
+    /// random 192 bit nonce in front of the packet; the AES methods derive a
+    /// subkey per session id and reuse the 96 bit nonce from the encrypted
+    /// header.
+    fn packet_key(&self, session_id: u64) -> Cow<'_, [u8]> {
+        if self.aead.is_chacha() {
+            Cow::Borrowed(&self.psk)
+        } else {
+            Cow::Owned(self.subkey(session_id))
+        }
+    }
+
     /// Seal `plaintext` in place, appending the 16 byte authentication tag.
     fn seal(&self, session_id: u64, nonce: &[u8], plaintext: Vec<u8>) -> io::Result<Vec<u8>> {
         let mut buffer = plaintext;
-        let result = match self.aead {
-            UdpAead::Aes128Gcm => {
-                let key = self.subkey(session_id);
-                let cipher = aes_gcm::Aes128Gcm::new_from_slice(&key)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let nonce = Array::<u8, U12>::try_from(nonce)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
-                cipher.encrypt_in_place(&nonce, &[], &mut buffer as &mut dyn Buffer)
-            }
-            UdpAead::Aes256Gcm => {
-                let key = self.subkey(session_id);
-                let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let nonce = Array::<u8, U12>::try_from(nonce)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
-                cipher.encrypt_in_place(&nonce, &[], &mut buffer as &mut dyn Buffer)
-            }
-            UdpAead::XChaCha20Poly1305 => {
-                let cipher = chacha20poly1305::XChaCha20Poly1305::new_from_slice(&self.psk)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let nonce = Array::<u8, U24>::try_from(nonce)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
-                cipher.encrypt_in_place(&nonce, &[], &mut buffer as &mut dyn Buffer)
-            }
-        };
-        match result {
-            Ok(()) => Ok(buffer),
-            Err(e) => Err(io::Error::other(format!("AEAD encryption failed: {e}"))),
-        }
+        udp_seal(
+            self.method,
+            &self.packet_key(session_id),
+            nonce,
+            &mut buffer,
+        )?;
+        Ok(buffer)
     }
 
     /// Open a sealed body, stripping the authentication tag.
@@ -170,37 +160,13 @@ impl Udp2022 {
             ));
         }
         let mut buffer = ciphertext;
-        let result = match self.aead {
-            UdpAead::Aes128Gcm => {
-                let key = self.subkey(session_id);
-                let cipher = aes_gcm::Aes128Gcm::new_from_slice(&key)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let nonce = Array::<u8, U12>::try_from(nonce)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
-                cipher.decrypt_in_place(&nonce, &[], &mut buffer as &mut dyn Buffer)
-            }
-            UdpAead::Aes256Gcm => {
-                let key = self.subkey(session_id);
-                let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let nonce = Array::<u8, U12>::try_from(nonce)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
-                cipher.decrypt_in_place(&nonce, &[], &mut buffer as &mut dyn Buffer)
-            }
-            UdpAead::XChaCha20Poly1305 => {
-                let cipher = chacha20poly1305::XChaCha20Poly1305::new_from_slice(&self.psk)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let nonce = Array::<u8, U24>::try_from(nonce)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid nonce"))?;
-                cipher.decrypt_in_place(&nonce, &[], &mut buffer as &mut dyn Buffer)
-            }
-        };
-        match result {
-            Ok(()) => Ok(buffer),
-            Err(e) => Err(io::Error::other(format!(
-                "AEAD decryption failed (authentication failed): {e}"
-            ))),
-        }
+        udp_open(
+            self.method,
+            &self.packet_key(session_id),
+            nonce,
+            &mut buffer,
+        )?;
+        Ok(buffer)
     }
 
     /// Decrypt a client -> server datagram.
@@ -572,7 +538,7 @@ impl<'a> Cursor<'a> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("unsupported address type {atyp:#x}"),
-                ))
+                ));
             }
         };
         let port = self.u16()?;
