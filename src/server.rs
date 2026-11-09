@@ -636,13 +636,18 @@ where
 {
     let address_type = &mut [0u8; 1];
     conn.read_exact(address_type).await?;
-    let rest = match address_type[0] {
-        TYPE_IPV4 => 6,
-        TYPE_IPV6 => 18,
+    // `rest` counts the bytes still to read after the address type. For a
+    // domain the length byte is part of the address, so it is read separately
+    // and put back into `buf` below instead of being counted here.
+    let (rest, domain_len) = match address_type[0] {
+        TYPE_IPV4 => (6, None),
+        TYPE_IPV6 => (18, None),
         TYPE_DOMAIN => {
             let len = &mut [0u8; 1];
             conn.read_exact(len).await?;
-            1 + len[0] as usize + 2
+            // The length byte is already consumed, but `buf` still needs a slot
+            // for it so the address can be parsed as `[len][name][port]`.
+            (1 + len[0] as usize + 2, Some(len[0]))
         }
         n => {
             log::error!("unknown address type, received: {:?}", n);
@@ -652,7 +657,16 @@ where
 
     let mut buf = vec![0u8; 1 + rest];
     buf[0] = address_type[0];
-    conn.read_exact(&mut buf[1..]).await?;
+    // A domain address is `[len][name][port]`; the length byte has already been
+    // consumed, so write it back and read only the name and port.
+    let offset = match domain_len {
+        Some(len) => {
+            buf[1] = len;
+            2
+        }
+        None => 1,
+    };
+    conn.read_exact(&mut buf[offset..]).await?;
     parse_socks_addr(&buf)
 }
 
