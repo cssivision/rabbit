@@ -1,13 +1,13 @@
 [package]
 name = "rabbit"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/cssivision/rabbit"
 homepage = "https://github.com/cssivision/rabbit"
 description = "personal VPN in rust."
 readme = "README.md"
-edition = "2018"
+edition = "2024"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -18,7 +18,7 @@ env_logger = "0.11"
 getopts = "0.2"
 rand = "0.10"
 md5 = "0.8"
-awak = "0.2"
+awak = "0.2.38"
 dns-resolver = { version = "0.2", default-features = false, features = ["awak-runtime"] }
 aes = "0.9"
 camellia = "0.2"
@@ -34,6 +34,7 @@ pin-project-lite = "0.2"
 futures-channel = "0.3"
 aes-gcm = "0.11"
 chacha20poly1305 = "0.11"
+aws-lc-rs = "1.19"
 hkdf = "0.13"
 sha1 = "0.11"
 bytes = "1.0"

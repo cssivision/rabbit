@@ -1,29 +1,113 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, ready};
+use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
-use awak::time::timeout;
-use awak::util::{copy_bidirectional, IdleTimeout};
+use awak::time::{interval, timeout};
+use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
 use bytes::BytesMut;
-use futures_channel::mpsc::{channel, Receiver, Sender};
-use futures_util::{future::join, AsyncRead, AsyncWrite, AsyncWriteExt, Stream};
+use futures_channel::mpsc::{Receiver, Sender, channel};
+use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt, Stream, future::join};
 use socket2::SockAddr;
 
-use crate::cipher::Cipher;
-use crate::config::{self, Network};
-use crate::listener;
-use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
-use crate::util::generate_raw_addr;
 use crate::CipherStream;
+use crate::cipher::Cipher;
+use crate::config::{self, Transport};
+use crate::listener;
+use crate::udp_legacy;
+use crate::udp2022::{PacketWindow, Udp2022};
+use crate::util::{COPY_BUFFER_SIZE, generate_raw_addr};
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_UDP_BUFFER_SIZE: usize = 65536;
+/// How long an AEAD-2022 UDP association is remembered per local peer.
+const DEFAULT_UDP2022_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
+/// How often idle associations are reaped even when no packet arrives.
+const DEFAULT_UDP_REAPER_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Client-side state of the AEAD-2022 UDP association with one peer.
+struct Udp2022Association {
+    client_session_id: u64,
+    next_packet_id: u64,
+    server_session_id: u64,
+    window: PacketWindow,
+    last_seen: Instant,
+}
+
+struct Udp2022Sessions {
+    sessions: Mutex<HashMap<SocketAddr, Udp2022Association>>,
+}
+
+impl Udp2022Sessions {
+    fn new() -> Udp2022Sessions {
+        Udp2022Sessions {
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Drop associations that have been idle for longer than the timeout.
+    fn reap(&self) {
+        let mut sessions = self.sessions.lock().unwrap();
+        let now = Instant::now();
+        sessions.retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
+    }
+
+    /// Reserve the packet id of the next outgoing packet.
+    fn next_packet_id(&self, peer_addr: SocketAddr) -> (u64, u64) {
+        let mut sessions = self.sessions.lock().unwrap();
+        let now = Instant::now();
+        sessions.retain(|_, s| now.duration_since(s.last_seen) < DEFAULT_UDP2022_SESSION_TIMEOUT);
+
+        let session = sessions
+            .entry(peer_addr)
+            .or_insert_with(|| Udp2022Association {
+                client_session_id: random_session_id(),
+                next_packet_id: 1,
+                server_session_id: 0,
+                window: PacketWindow::new(),
+                last_seen: now,
+            });
+        session.last_seen = now;
+
+        let packet_id = session.next_packet_id;
+        session.next_packet_id = session.next_packet_id.wrapping_add(1);
+        (session.client_session_id, packet_id)
+    }
+
+    /// Validate a response packet from the server and remember the server
+    /// session id it uses.
+    fn accept_response(
+        &self,
+        peer_addr: SocketAddr,
+        packet_id: u64,
+        server_session_id: u64,
+    ) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.get_mut(&peer_addr) {
+            session.last_seen = Instant::now();
+            if session.server_session_id != 0 && session.server_session_id != server_session_id {
+                return false;
+            }
+            session.server_session_id = server_session_id;
+            return session.window.validate(packet_id);
+        }
+        false
+    }
+}
+
+fn random_session_id() -> u64 {
+    let mut buf = [0u8; 8];
+    rand::fill(&mut buf[..]);
+    let id = u64::from_be_bytes(buf);
+    if id == 0 { 1 } else { id }
+}
 
 pub struct Server {
     services: Vec<Service>,
@@ -57,10 +141,10 @@ impl Service {
     }
 
     pub async fn serve(&self) -> io::Result<()> {
-        match self.config.network {
-            Network::Tcp => self.stream_relay().await,
-            Network::Udp => self.packet_relay().await,
-            Network::Both => {
+        match self.config.transport {
+            Transport::Stream => self.stream_relay().await,
+            Transport::Packet => self.packet_relay().await,
+            Transport::Both => {
                 let fut1 = self.stream_relay();
                 let fut2 = self.packet_relay();
                 let _ = join(fut1, fut2).await;
@@ -98,6 +182,20 @@ impl Service {
         let socket = listener::bind_udp(self.config.local_addr)?;
         log::info!("listening udp on {:?}", self.config.local_addr);
         let (sender, receiver) = channel(1024);
+        let sessions = Arc::new(Udp2022Sessions::new());
+
+        // Reap idle associations on a timer: a peer that goes away should not
+        // pin a replay window and counters forever on a quiet redir.
+        let reaper_sessions = Arc::clone(&sessions);
+        awak::spawn(async move {
+            let mut ticker = interval(DEFAULT_UDP_REAPER_INTERVAL);
+            loop {
+                ticker.tick().await;
+                reaper_sessions.reap();
+            }
+        })
+        .detach();
+
         let udp_relay = UdpRelay {
             buf: [0u8; MAX_UDP_BUFFER_SIZE],
             sender,
@@ -107,6 +205,7 @@ impl Service {
             cipher,
             server_addr: self.config.server_addr,
             redir_addr: self.config.redir_addr,
+            sessions,
         };
         udp_relay.await
     }
@@ -162,6 +261,7 @@ struct UdpRelay {
     cipher: Cipher,
     server_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
+    sessions: Arc<Udp2022Sessions>,
 }
 
 impl UdpRelay {
@@ -203,10 +303,18 @@ impl Future for UdpRelay {
                     let sender = me.sender.clone();
                     let server_addr = me.server_addr;
                     let redir_addr = me.redir_addr;
+                    let sessions = Arc::clone(&me.sessions);
                     awak::spawn(async move {
-                        if let Err(e) =
-                            proxy_packet(server_addr, cipher, buf, peer_addr, redir_addr, sender)
-                                .await
+                        if let Err(e) = proxy_packet(
+                            server_addr,
+                            cipher,
+                            buf,
+                            peer_addr,
+                            redir_addr,
+                            sender,
+                            sessions,
+                        )
+                        .await
                         {
                             log::error!("failed to proxy; error={}", e);
                         };
@@ -225,18 +333,31 @@ async fn proxy_packet(
     peer_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
     mut sender: Sender<(Vec<u8>, SocketAddr)>,
+    sessions: Arc<Udp2022Sessions>,
 ) -> io::Result<(u64, u64)> {
     let redir_addr = if let Some(redir_addr) = redir_addr {
         redir_addr
     } else {
         unimplemented!()
     };
-    cipher.init_encrypt();
-    let mut data = cipher.encrypt_iv_or_salt().to_vec();
-    let rawaddr = generate_raw_addr(&redir_addr.ip().to_string(), redir_addr.port());
-    data.extend_from_slice(&rawaddr);
-    data.extend_from_slice(&buf);
-    cipher.encrypt_in_place(&mut data[cipher.iv_or_salt_len()..])?;
+    if cipher.is_aead2022() {
+        return proxy_packet_2022(
+            server_addr,
+            cipher,
+            buf,
+            redir_addr,
+            peer_addr,
+            sender,
+            sessions,
+        )
+        .await;
+    }
+    let data = udp_legacy::seal(
+        &cipher,
+        &redir_addr.ip().to_string(),
+        redir_addr.port(),
+        &buf,
+    )?;
 
     let local: SocketAddr = ([0u8; 4], 0).into();
     // send to and recv from target.
@@ -247,35 +368,62 @@ async fn proxy_packet(
     let n = socket.recv(&mut recv_buf).await?;
     recv_buf.truncate(n);
 
-    // The server prefixes each UDP response with its own salt/IV.
-    let salt_len = cipher.iv_or_salt_len();
-    if n < salt_len {
+    // The response is framed like a request: seed, source address, payload.
+    let (_, _, payload) = udp_legacy::open(&mut cipher, &recv_buf[..n])?;
+    sender
+        .try_send((payload, peer_addr))
+        .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
+    Ok((buf.len() as u64, n as u64))
+}
+
+/// Relay a single AEAD-2022 (SIP022) UDP datagram to the server.
+async fn proxy_packet_2022(
+    server_addr: SocketAddr,
+    cipher: Cipher,
+    buf: Vec<u8>,
+    redir_addr: SocketAddr,
+    peer_addr: SocketAddr,
+    mut sender: Sender<(Vec<u8>, SocketAddr)>,
+    sessions: Arc<Udp2022Sessions>,
+) -> io::Result<(u64, u64)> {
+    let udp = Udp2022::new(cipher.method(), cipher.key())?;
+    let (client_session_id, packet_id) = sessions.next_packet_id(peer_addr);
+    let data = udp.encrypt_client_packet(
+        client_session_id,
+        packet_id,
+        &redir_addr.ip().to_string(),
+        redir_addr.port(),
+        &buf,
+    )?;
+
+    // send to and recv from target.
+    let local: SocketAddr = ([0u8; 4], 0).into();
+    let socket = UdpSocket::bind(local)?;
+    socket.connect(server_addr)?;
+    let _ = socket.send(&data).await?;
+    let mut recv_buf = vec![0u8; MAX_UDP_BUFFER_SIZE];
+    let n = socket.recv(&mut recv_buf).await?;
+    recv_buf.truncate(n);
+
+    let response = udp.decrypt_server_packet(&recv_buf)?;
+    if response.client_session_id != client_session_id {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "udp response shorter than salt",
+            "2022 udp response belongs to another session",
         ));
     }
-    cipher
-        .decrypt_iv_or_salt_mut()
-        .copy_from_slice(&recv_buf[..salt_len]);
-    cipher.init_decrypt();
-    recv_buf.drain(..salt_len);
-    cipher.decrypt_in_place(&mut recv_buf)?;
-
-    // Strip the SOCKS5 address prefix that the server's response body starts with.
-    if let Some(atyp) = recv_buf.first().copied() {
-        let skip = match atyp {
-            TYPE_IPV4 => 1 + 4 + 2,
-            TYPE_IPV6 => 1 + 16 + 2,
-            TYPE_DOMAIN => 2 + recv_buf.get(1).copied().unwrap_or(0) as usize + 2,
-            _ => 0,
-        };
-        if skip > 0 && recv_buf.len() >= skip {
-            recv_buf.drain(..skip);
-        }
+    if !sessions.accept_response(peer_addr, response.packet_id, response.server_session_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "replayed 2022 udp response, packet id {}",
+                response.packet_id
+            ),
+        ));
     }
+
     sender
-        .try_send((recv_buf.to_vec(), peer_addr))
+        .try_send((response.payload, peer_addr))
         .map_err(|e| io::Error::other(format!("send fail: {e}")))?;
     Ok((buf.len() as u64, n as u64))
 }
@@ -308,7 +456,7 @@ where
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional(socket1, &mut socket2),
+        copy_bidirectional_with_buffer_size(socket1, &mut socket2, COPY_BUFFER_SIZE),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )

@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 
 use dns_resolver::Resolver;
-use rand::{rng, RngExt};
+use rand::{RngExt, rng};
 
 static GLOBAL_RESOLVER: OnceLock<Resolver> = OnceLock::new();
 
