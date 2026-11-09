@@ -611,11 +611,36 @@ fn is_aead(method: &Method) -> bool {
     )
 }
 
-fn is_aead2022(method: &Method) -> bool {
+/// Whether `method` is one of the SIP022 AEAD-2022 methods.
+pub fn is_aead2022(method: &Method) -> bool {
     matches!(
         method,
         Method::Blake3Aes128Gcm | Method::Blake3Aes256Gcm | Method::Blake3ChaCha20Poly1305
     )
+}
+
+impl Method {
+    /// Whether this is the ChaCha20-Poly1305 SIP022 method.
+    ///
+    /// It differs from the AES variants in more than the cipher: its datagrams
+    /// carry a 24 byte random nonce in place of the encrypted 16 byte separate
+    /// header, and they are sealed with the pre-shared key rather than a
+    /// per-session subkey.
+    pub fn is_chacha2022(&self) -> bool {
+        matches!(self, Method::Blake3ChaCha20Poly1305)
+    }
+
+    /// Key length in bytes, for methods that take a pre-shared key.
+    ///
+    /// Only meaningful for the AEAD-2022 methods, whose key comes from the
+    /// configuration verbatim rather than being derived from a password.
+    pub fn psk_len(&self) -> usize {
+        match self {
+            Method::Blake3Aes128Gcm => 16,
+            // The keyed-BLAKE3 methods and both 256 bit ciphers use 32 bytes.
+            _ => 32,
+        }
+    }
 }
 
 impl Cipher {

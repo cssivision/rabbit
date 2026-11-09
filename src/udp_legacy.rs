@@ -11,66 +11,18 @@
 //! Both sides of the relay use these helpers, so the layout is defined once.
 
 use std::io;
-use std::net::Ipv4Addr;
 
 use crate::cipher::Cipher;
-use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
-use crate::util::generate_raw_addr;
+use bytes::Bytes;
 
-/// Parse a SOCKS5 address prefix, returning how many bytes it occupies.
-pub fn parse_address(buf: &[u8]) -> io::Result<(usize, String, u16)> {
-    let atyp = match buf.first() {
-        Some(atyp) => *atyp,
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "empty address",
-            ));
-        }
-    };
-    match atyp {
-        TYPE_IPV4 => {
-            if buf.len() < 7 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short ipv4"));
-            }
-            let addr = Ipv4Addr::new(buf[1], buf[2], buf[3], buf[4]);
-            let port = u16::from_be_bytes([buf[5], buf[6]]);
-            Ok((7, format!("{addr}"), port))
-        }
-        TYPE_IPV6 => {
-            if buf.len() < 19 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short ipv6"));
-            }
-            let mut octets = [0u8; 16];
-            octets.copy_from_slice(&buf[1..17]);
-            let addr = std::net::Ipv6Addr::from(octets);
-            let port = u16::from_be_bytes([buf[17], buf[18]]);
-            Ok((19, format!("{addr}"), port))
-        }
-        TYPE_DOMAIN => {
-            let len = match buf.get(1) {
-                Some(len) => *len as usize,
-                None => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short domain")),
-            };
-            let end = 2 + len + 2;
-            if buf.len() < end {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short domain"));
-            }
-            let host = String::from_utf8_lossy(&buf[2..2 + len]).into_owned();
-            let port = u16::from_be_bytes([buf[2 + len], buf[3 + len]]);
-            Ok((end, host, port))
-        }
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unsupported address type {other}"),
-        )),
-    }
-}
+use crate::util::{generate_raw_addr, parse_address};
 
 /// Seal one datagram: fresh seed, address prefix, payload and the tag space
 /// that AEAD methods keep at the end.
-pub fn seal(cipher: &Cipher, host: &str, port: u16, payload: &[u8]) -> io::Result<Vec<u8>> {
-    // A datagram is self-contained, so every one carries its own seed.
+///
+/// Every datagram is self-contained, so each one gets its own seed: the cipher
+/// is reset from `cipher` for that purpose.
+pub fn seal(cipher: &Cipher, host: &str, port: u16, payload: &[u8]) -> io::Result<Bytes> {
     let mut cipher = cipher.reset();
     cipher.init_encrypt();
 
@@ -82,12 +34,12 @@ pub fn seal(cipher: &Cipher, host: &str, port: u16, payload: &[u8]) -> io::Resul
         data.extend_from_slice(&vec![0u8; cipher.tag_size()]);
     }
     cipher.encrypt_in_place(&mut data[seed_len..])?;
-    Ok(data)
+    Ok(Bytes::from(data))
 }
 
 /// Open one datagram: read its seed, decrypt, drop the tag and parse the
 /// address prefix that the sender put in front of the payload.
-pub fn open(cipher: &mut Cipher, packet: &[u8]) -> io::Result<(String, u16, Vec<u8>)> {
+pub fn open(cipher: &mut Cipher, packet: &[u8]) -> io::Result<(String, u16, Bytes)> {
     let seed_len = cipher.seed_len();
     if packet.len() < seed_len {
         return Err(io::Error::new(
@@ -116,7 +68,7 @@ pub fn open(cipher: &mut Cipher, packet: &[u8]) -> io::Result<(String, u16, Vec<
 
     let (n, host, port) = parse_address(&body)?;
     body.drain(..n);
-    Ok((host, port, body))
+    Ok((host, port, Bytes::from(body)))
 }
 
 #[cfg(test)]
@@ -135,7 +87,7 @@ mod tests {
             let (host, port, body) = open(&mut opener, &datagram).unwrap();
             assert_eq!(host, "127.0.0.1");
             assert_eq!(port, 8080);
-            assert_eq!(body, payload);
+            assert_eq!(&body[..], payload);
         }
     }
 }

@@ -865,6 +865,7 @@ dependencies = [
  "hkdf",
  "libc",
  "log",
+ "lru_time_cache",
  "md5",
  "pin-project-lite",
  "rand 0.10.3",

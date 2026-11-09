@@ -15,17 +15,14 @@
 //!
 //! See https://shadowsocks.org/doc/sip022.html.
 
-use std::borrow::Cow;
-use std::convert::TryFrom;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use aes::{Aes128, Aes256, Block};
+use bytes::{Buf, Bytes};
 
-use crate::cipher::{Method, udp_open, udp_seal};
-use crate::socks5::v5::{TYPE_DOMAIN, TYPE_IPV4, TYPE_IPV6};
+use crate::cipher::{Cipher, Method, udp_open, udp_seal};
 use crate::util::{derive_blake3_subkey, generate_raw_addr};
 
 /// Client -> server packet.
@@ -47,7 +44,7 @@ pub struct ClientPacket {
     pub packet_id: u64,
     pub host: String,
     pub port: u16,
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
 }
 
 /// A decrypted server -> client packet.
@@ -57,71 +54,78 @@ pub struct ServerPacket {
     pub client_session_id: u64,
     pub host: String,
     pub port: u16,
-    pub payload: Vec<u8>,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum UdpAead {
-    Aes128Gcm,
-    Aes256Gcm,
-    XChaCha20Poly1305,
-}
-
-impl UdpAead {
-    fn of(method: Method) -> Option<UdpAead> {
-        match method {
-            Method::Blake3Aes128Gcm => Some(UdpAead::Aes128Gcm),
-            Method::Blake3Aes256Gcm => Some(UdpAead::Aes256Gcm),
-            Method::Blake3ChaCha20Poly1305 => Some(UdpAead::XChaCha20Poly1305),
-            _ => None,
-        }
-    }
-
-    fn key_len(&self) -> usize {
-        match self {
-            UdpAead::Aes128Gcm => 16,
-            UdpAead::Aes256Gcm => 32,
-            UdpAead::XChaCha20Poly1305 => 32,
-        }
-    }
-
-    fn is_chacha(&self) -> bool {
-        matches!(self, UdpAead::XChaCha20Poly1305)
-    }
+    pub payload: Bytes,
 }
 
 /// 2022 UDP cipher state: the pre-shared key plus the method.
 pub struct Udp2022 {
     method: Method,
-    aead: UdpAead,
     psk: Vec<u8>,
+    /// Most recently derived session subkey.
+    ///
+    /// The subkey depends only on `(psk, session_id)`, so it is constant for the
+    /// lifetime of a session. A relay sees long runs of packets from the same
+    /// session, so caching the last one turns a BLAKE3 XOF per packet into one
+    /// per session. ChaCha20 methods do not use it: they seal with the psk.
+    ///
+    /// A plain field, not a lock: a `Udp2022` is owned by one task and only ever
+    /// used through `&mut self` (see `subkey`), so there is nothing to
+    /// synchronise.
+    cached_subkey: Option<(u64, Vec<u8>)>,
 }
 
 impl Udp2022 {
     pub fn new(method: Method, psk: &[u8]) -> io::Result<Udp2022> {
-        let aead = UdpAead::of(method).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "not an AEAD 2022 method")
-        })?;
-        if psk.len() != aead.key_len() {
+        if !crate::cipher::is_aead2022(&method) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not an AEAD 2022 method",
+            ));
+        }
+        if psk.len() != method.psk_len() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "key length must be {} for 2022 AEAD ciphers",
-                    aead.key_len()
+                    method.psk_len()
                 ),
             ));
         }
         Ok(Udp2022 {
             method,
-            aead,
             psk: psk.to_vec(),
+            cached_subkey: None,
         })
     }
 
+    /// The SIP022 codec for `cipher`, or `None` when the method is not a 2022
+    /// one.
+    ///
+    /// Both the listener and every flow need this, and keeping the "only build
+    /// it for 2022 methods" decision in one place stops the two from drifting.
+    pub fn from_cipher(cipher: &Cipher) -> io::Result<Option<Udp2022>> {
+        if cipher.is_aead2022() {
+            Ok(Some(Udp2022::new(cipher.method(), cipher.key())?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Session subkey: `blake3::derive_key(psk || session_id_be)`.
-    fn subkey(&self, session_id: u64) -> Vec<u8> {
+    ///
+    /// Cached: see the field docs. Takes `&mut self` so the cache needs no lock.
+    fn subkey(&mut self, session_id: u64) -> Vec<u8> {
+        if let Some((id, key)) = self.cached_subkey.as_ref()
+            && *id == session_id
+        {
+            // The caller needs the bytes past this borrow, so this one clone
+            // stays; `packet_key` avoids it by borrowing instead.
+            return key.clone();
+        }
+
         let mut key = derive_blake3_subkey(&self.psk, &session_id.to_be_bytes());
-        key.truncate(self.aead.key_len());
+        key.truncate(self.method.psk_len());
+        self.cached_subkey = Some((session_id, key.clone()));
         key
     }
 
@@ -131,28 +135,28 @@ impl Udp2022 {
     /// random 192 bit nonce in front of the packet; the AES methods derive a
     /// subkey per session id and reuse the 96 bit nonce from the encrypted
     /// header.
-    fn packet_key(&self, session_id: u64) -> Cow<'_, [u8]> {
-        if self.aead.is_chacha() {
-            Cow::Borrowed(&self.psk)
+    ///
+    /// Borrows the key, so a cached subkey costs no copy.
+    fn packet_key(&mut self, session_id: u64) -> &[u8] {
+        if self.method.is_chacha2022() {
+            &self.psk
         } else {
-            Cow::Owned(self.subkey(session_id))
+            if self.cached_subkey.as_ref().map(|(id, _)| *id) != Some(session_id) {
+                self.subkey(session_id);
+            }
+            &self.cached_subkey.as_ref().expect("just populated").1
         }
     }
 
     /// Seal `plaintext` in place, appending the 16 byte authentication tag.
-    fn seal(&self, session_id: u64, nonce: &[u8], plaintext: Vec<u8>) -> io::Result<Vec<u8>> {
+    fn seal(&mut self, session_id: u64, nonce: &[u8], plaintext: Vec<u8>) -> io::Result<Vec<u8>> {
         let mut buffer = plaintext;
-        udp_seal(
-            self.method,
-            &self.packet_key(session_id),
-            nonce,
-            &mut buffer,
-        )?;
+        udp_seal(self.method, self.packet_key(session_id), nonce, &mut buffer)?;
         Ok(buffer)
     }
 
     /// Open a sealed body, stripping the authentication tag.
-    fn open(&self, session_id: u64, nonce: &[u8], ciphertext: Vec<u8>) -> io::Result<Vec<u8>> {
+    fn open(&mut self, session_id: u64, nonce: &[u8], ciphertext: Vec<u8>) -> io::Result<Vec<u8>> {
         if ciphertext.len() < TAG_LEN {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -160,22 +164,18 @@ impl Udp2022 {
             ));
         }
         let mut buffer = ciphertext;
-        udp_open(
-            self.method,
-            &self.packet_key(session_id),
-            nonce,
-            &mut buffer,
-        )?;
+        udp_open(self.method, self.packet_key(session_id), nonce, &mut buffer)?;
         Ok(buffer)
     }
 
     /// Decrypt a client -> server datagram.
-    pub fn decrypt_client_packet(&self, packet: &[u8]) -> io::Result<ClientPacket> {
-        let (session_id, packet_id, plaintext) = self.open_packet(packet)?;
-        let mut cursor = Cursor::new(&plaintext);
-        if self.aead.is_chacha() {
-            let body_session_id = cursor.u64()?;
-            let body_packet_id = cursor.u64()?;
+    pub fn decrypt_client_packet(&mut self, packet: &[u8]) -> io::Result<ClientPacket> {
+        // `plaintext` holds the decrypted body and is consumed as the cursor:
+        // whatever remains after the header is the payload, without a copy.
+        let (session_id, packet_id, mut plaintext) = self.open_packet(packet)?;
+        if self.method.is_chacha2022() {
+            let body_session_id = plaintext.try_get_u64()?;
+            let body_packet_id = plaintext.try_get_u64()?;
             if body_session_id != session_id || body_packet_id != packet_id {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -183,33 +183,32 @@ impl Udp2022 {
                 ));
             }
         }
-        let socket_type = cursor.u8()?;
+        let socket_type = plaintext.try_get_u8()?;
         if socket_type != CLIENT_TYPE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid socket type {socket_type:#x}, expecting {CLIENT_TYPE:#x}"),
             ));
         }
-        cursor.timestamp()?;
-        cursor.skip_padding()?;
-        let (host, port) = cursor.address()?;
+        check_timestamp(plaintext.try_get_u64()?)?;
+        skip_padding(&mut plaintext)?;
+        let (host, port) = read_address(&mut plaintext)?;
 
         Ok(ClientPacket {
             client_session_id: session_id,
             packet_id,
             host,
             port,
-            payload: cursor.remaining().to_vec(),
+            payload: plaintext,
         })
     }
 
     /// Decrypt a server -> client datagram.
-    pub fn decrypt_server_packet(&self, packet: &[u8]) -> io::Result<ServerPacket> {
-        let (session_id, packet_id, plaintext) = self.open_packet(packet)?;
-        let mut cursor = Cursor::new(&plaintext);
-        if self.aead.is_chacha() {
-            let body_session_id = cursor.u64()?;
-            let body_packet_id = cursor.u64()?;
+    pub fn decrypt_server_packet(&mut self, packet: &[u8]) -> io::Result<ServerPacket> {
+        let (session_id, packet_id, mut plaintext) = self.open_packet(packet)?;
+        if self.method.is_chacha2022() {
+            let body_session_id = plaintext.try_get_u64()?;
+            let body_packet_id = plaintext.try_get_u64()?;
             if body_session_id != session_id || body_packet_id != packet_id {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -217,17 +216,17 @@ impl Udp2022 {
                 ));
             }
         }
-        let socket_type = cursor.u8()?;
+        let socket_type = plaintext.try_get_u8()?;
         if socket_type != SERVER_TYPE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid socket type {socket_type:#x}, expecting {SERVER_TYPE:#x}"),
             ));
         }
-        cursor.timestamp()?;
-        let client_session_id = cursor.u64()?;
-        cursor.skip_padding()?;
-        let (host, port) = cursor.address()?;
+        check_timestamp(plaintext.try_get_u64()?)?;
+        let client_session_id = plaintext.try_get_u64()?;
+        skip_padding(&mut plaintext)?;
+        let (host, port) = read_address(&mut plaintext)?;
 
         Ok(ServerPacket {
             server_session_id: session_id,
@@ -235,21 +234,21 @@ impl Udp2022 {
             client_session_id,
             host,
             port,
-            payload: cursor.remaining().to_vec(),
+            payload: plaintext,
         })
     }
 
     /// Build a client -> server datagram.
     pub fn encrypt_client_packet(
-        &self,
+        &mut self,
         client_session_id: u64,
         packet_id: u64,
         host: &str,
         port: u16,
         payload: &[u8],
-    ) -> io::Result<Vec<u8>> {
+    ) -> io::Result<Bytes> {
         let mut body = Vec::with_capacity(64 + payload.len());
-        if self.aead.is_chacha() {
+        if self.method.is_chacha2022() {
             body.extend_from_slice(&client_session_id.to_be_bytes());
             body.extend_from_slice(&packet_id.to_be_bytes());
         }
@@ -262,18 +261,21 @@ impl Udp2022 {
     }
 
     /// Build a server -> client datagram.
+    ///
+    /// `source` is the address the reply came from, which is what the peer sees
+    /// in the header.
     #[allow(clippy::too_many_arguments)]
     pub fn encrypt_server_packet(
-        &self,
+        &mut self,
         server_session_id: u64,
         packet_id: u64,
         client_session_id: u64,
         host: &str,
         port: u16,
         payload: &[u8],
-    ) -> io::Result<Vec<u8>> {
+    ) -> io::Result<Bytes> {
         let mut body = Vec::with_capacity(64 + payload.len());
-        if self.aead.is_chacha() {
+        if self.method.is_chacha2022() {
             body.extend_from_slice(&server_session_id.to_be_bytes());
             body.extend_from_slice(&packet_id.to_be_bytes());
         }
@@ -288,17 +290,17 @@ impl Udp2022 {
 
     /// Encrypt a body and prepend the separate header (AES-ECB) or the nonce
     /// (ChaCha20-Poly1305).
-    fn seal_packet(&self, session_id: u64, packet_id: u64, body: Vec<u8>) -> io::Result<Vec<u8>> {
-        if self.aead.is_chacha() {
+    fn seal_packet(&mut self, session_id: u64, packet_id: u64, body: Vec<u8>) -> io::Result<Bytes> {
+        if self.method.is_chacha2022() {
             let mut nonce = vec![0u8; CHACHA_NONCE_LEN];
             rand::fill(&mut nonce[..]);
             let body = self.seal(session_id, &nonce, body)?;
             let mut packet = nonce;
             packet.extend_from_slice(&body);
-            return Ok(packet);
+            return Ok(Bytes::from(packet));
         }
 
-        let mut header = [0u8; AES_HEADER_LEN];
+        let mut header = Block::default();
         header[..8].copy_from_slice(&session_id.to_be_bytes());
         header[8..].copy_from_slice(&packet_id.to_be_bytes());
         let nonce = header[4..16].to_vec();
@@ -307,52 +309,45 @@ impl Udp2022 {
 
         let mut packet = header.to_vec();
         packet.extend_from_slice(&body);
-        Ok(packet)
+        Ok(Bytes::from(packet))
     }
 
-    fn encrypt_header(&self, header: &mut [u8; AES_HEADER_LEN]) -> io::Result<()> {
-        match self.aead {
-            UdpAead::Aes128Gcm => {
-                let cipher = Aes128::new_from_slice(&self.psk)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let block = <&mut Block>::try_from(&mut header[..])
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "block"))?;
-                cipher.encrypt_block(block);
+    fn encrypt_header(&self, header: &mut Block) -> io::Result<()> {
+        // The 16 byte separate header is AES-ECB encrypted with the psk, so the
+        // key size decides which AES variant to use.
+        match self.method {
+            Method::Blake3Aes128Gcm => {
+                let cipher = Aes128::new_from_slice(&self.psk).map_err(io::Error::other)?;
+                cipher.encrypt_block(header);
             }
             _ => {
-                let cipher = Aes256::new_from_slice(&self.psk)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let block = <&mut Block>::try_from(&mut header[..])
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "block"))?;
-                cipher.encrypt_block(block);
+                let cipher = Aes256::new_from_slice(&self.psk).map_err(io::Error::other)?;
+                cipher.encrypt_block(header);
             }
         }
         Ok(())
     }
 
-    fn decrypt_header(&self, header: &mut [u8; AES_HEADER_LEN]) -> io::Result<()> {
-        match self.aead {
-            UdpAead::Aes128Gcm => {
-                let cipher = Aes128::new_from_slice(&self.psk)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let block = <&mut Block>::try_from(&mut header[..])
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "block"))?;
-                cipher.decrypt_block(block);
+    fn decrypt_header(&self, header: &mut Block) -> io::Result<()> {
+        match self.method {
+            Method::Blake3Aes128Gcm => {
+                let cipher = Aes128::new_from_slice(&self.psk).map_err(io::Error::other)?;
+                cipher.decrypt_block(header);
             }
             _ => {
-                let cipher = Aes256::new_from_slice(&self.psk)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                let block = <&mut Block>::try_from(&mut header[..])
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "block"))?;
-                cipher.decrypt_block(block);
+                let cipher = Aes256::new_from_slice(&self.psk).map_err(io::Error::other)?;
+                cipher.decrypt_block(header);
             }
         }
         Ok(())
     }
 
     /// Decrypt the envelope and return `(session_id, packet_id, plaintext_body)`.
-    fn open_packet(&self, packet: &[u8]) -> io::Result<(u64, u64, Vec<u8>)> {
-        if self.aead.is_chacha() {
+    ///
+    /// The body is a `Bytes` so the caller can slice the payload out of it
+    /// without copying.
+    fn open_packet(&mut self, packet: &[u8]) -> io::Result<(u64, u64, Bytes)> {
+        if self.method.is_chacha2022() {
             if packet.len() < CHACHA_NONCE_LEN + 16 + TAG_LEN {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -371,7 +366,9 @@ impl Udp2022 {
             sid.copy_from_slice(&body[..8]);
             let mut pid = [0u8; 8];
             pid.copy_from_slice(&body[8..16]);
-            return Ok((u64::from_be_bytes(sid), u64::from_be_bytes(pid), body));
+            let session_id = u64::from_be_bytes(sid);
+            let packet_id = u64::from_be_bytes(pid);
+            return Ok((session_id, packet_id, Bytes::from(body)));
         }
 
         if packet.len() < AES_HEADER_LEN + 16 + TAG_LEN {
@@ -380,7 +377,7 @@ impl Udp2022 {
                 "packet too short",
             ));
         }
-        let mut header = [0u8; AES_HEADER_LEN];
+        let mut header = Block::default();
         header.copy_from_slice(&packet[..AES_HEADER_LEN]);
         self.decrypt_header(&mut header)?;
         let mut sid = [0u8; 8];
@@ -391,7 +388,7 @@ impl Udp2022 {
 
         let session_id = u64::from_be_bytes(sid);
         let body = self.open(session_id, &nonce, packet[AES_HEADER_LEN..].to_vec())?;
-        Ok((session_id, u64::from_be_bytes(pid), body))
+        Ok((session_id, u64::from_be_bytes(pid), Bytes::from(body)))
     }
 }
 
@@ -460,92 +457,118 @@ fn now() -> u64 {
         .unwrap_or(0)
 }
 
-struct Cursor<'a> {
-    buf: &'a [u8],
-    pos: usize,
+/// Reject a timestamp that is too far from now.
+fn check_timestamp(ts: u64) -> io::Result<()> {
+    let diff = now().abs_diff(ts);
+    if diff > TIMESTAMP_MAX_DIFF {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid timestamp, clock skew {diff}s"),
+        ));
+    }
+    Ok(())
 }
 
-impl<'a> Cursor<'a> {
-    fn new(buf: &'a [u8]) -> Cursor<'a> {
-        Cursor { buf, pos: 0 }
+/// Skip the padding field: `[u16 length][length bytes]`.
+fn skip_padding(cursor: &mut Bytes) -> io::Result<()> {
+    let n = cursor.try_get_u16()? as usize;
+    if cursor.remaining() < n {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "packet too short",
+        ));
     }
+    cursor.advance(n);
+    Ok(())
+}
 
-    fn take(&mut self, n: usize) -> io::Result<&'a [u8]> {
-        if self.buf.len() < self.pos + n {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "packet too short",
-            ));
-        }
-        let s = &self.buf[self.pos..self.pos + n];
-        self.pos += n;
-        Ok(s)
-    }
+/// Read a SOCKS5 address: `[atyp][addr][port]`.
+///
+/// Delegates to the legacy UDP codec's parser, which is where this framing is
+/// already implemented, and advances the cursor by the number of bytes it
+/// reports consuming.
+fn read_address(cursor: &mut Bytes) -> io::Result<(String, u16)> {
+    let (consumed, host, port) = crate::util::parse_address(cursor)?;
+    cursor.advance(consumed);
+    Ok((host, port))
+}
 
-    fn u8(&mut self) -> io::Result<u8> {
-        Ok(self.take(1)?[0])
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn u16(&mut self) -> io::Result<u16> {
-        let mut b = [0u8; 2];
-        b.copy_from_slice(self.take(2)?);
-        Ok(u16::from_be_bytes(b))
-    }
+    const PSK16: [u8; 16] = [0x11; 16];
+    const PSK32: [u8; 32] = [0x22; 32];
 
-    fn u64(&mut self) -> io::Result<u64> {
-        let mut b = [0u8; 8];
-        b.copy_from_slice(self.take(8)?);
-        Ok(u64::from_be_bytes(b))
-    }
+    /// The cached subkey must match the one derived from scratch, and must be
+    /// reused across packets of the same session.
+    #[test]
+    fn subkey_cache_returns_the_same_bytes() {
+        let mut udp = Udp2022::new(Method::Blake3Aes128Gcm, &PSK16).unwrap();
 
-    fn timestamp(&mut self) -> io::Result<u64> {
-        let ts = self.u64()?;
-        let diff = now().abs_diff(ts);
-        if diff > TIMESTAMP_MAX_DIFF {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid timestamp, clock skew {diff}s"),
-            ));
-        }
-        Ok(ts)
-    }
-
-    fn skip_padding(&mut self) -> io::Result<()> {
-        let n = self.u16()? as usize;
-        self.take(n)?;
-        Ok(())
-    }
-
-    fn address(&mut self) -> io::Result<(String, u16)> {
-        let atyp = self.u8()?;
-        let host = match atyp {
-            TYPE_IPV4 => {
-                let mut b = [0u8; 4];
-                b.copy_from_slice(self.take(4)?);
-                Ipv4Addr::from(b).to_string()
-            }
-            TYPE_IPV6 => {
-                let mut b = [0u8; 16];
-                b.copy_from_slice(self.take(16)?);
-                Ipv6Addr::from(b).to_string()
-            }
-            TYPE_DOMAIN => {
-                let len = self.u8()? as usize;
-                String::from_utf8(self.take(len)?.to_vec())
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-            }
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unsupported address type {atyp:#x}"),
-                ));
-            }
+        let first = udp.subkey(0x0102_0304_0506_0708);
+        let expected = {
+            let mut key = derive_blake3_subkey(&PSK16, &0x0102_0304_0506_0708u64.to_be_bytes());
+            key.truncate(16);
+            key
         };
-        let port = self.u16()?;
-        Ok((host, port))
+        assert_eq!(first, expected, "first derivation differs");
+
+        // Second call hits the cache; the value must be identical.
+        assert_eq!(udp.subkey(0x0102_0304_0506_0708), first);
     }
 
-    fn remaining(&self) -> &'a [u8] {
-        &self.buf[self.pos..]
+    /// Switching session ids re-derives, and switching back must still be
+    /// correct (the cache is single-slot, so the old entry is replaced).
+    #[test]
+    fn subkey_cache_handles_session_switches() {
+        let mut udp = Udp2022::new(Method::Blake3Aes256Gcm, &PSK32).unwrap();
+
+        let a = udp.subkey(1);
+        let b = udp.subkey(2);
+        assert_ne!(a, b, "different sessions must derive different subkeys");
+        assert_eq!(udp.subkey(1), a, "re-derivation after a switch differs");
+    }
+
+    /// An AEAD-2022 packet must still round-trip after the cache was warmed by a
+    /// different session.
+    #[test]
+    fn packet_round_trip_after_session_switch() {
+        let mut udp = Udp2022::new(Method::Blake3Aes128Gcm, &PSK16).unwrap();
+
+        // Warm the cache with another session.
+        let warm = udp
+            .encrypt_client_packet(0xaaa, 1, "127.0.0.1", 1, b"other")
+            .unwrap();
+        let _ = udp.decrypt_client_packet(&warm);
+
+        let packet = udp
+            .encrypt_client_packet(0xbbb, 1, "example.com", 8080, b"payload")
+            .unwrap();
+        let decoded = udp.decrypt_client_packet(&packet).unwrap();
+        assert_eq!(decoded.client_session_id, 0xbbb);
+        assert_eq!(decoded.host, "example.com");
+        assert_eq!(decoded.port, 8080);
+        assert_eq!(&decoded.payload[..], b"payload");
+    }
+
+    /// The ChaCha20 method seals with the psk, so it must never populate the
+    /// subkey cache — its "subkey" would be wrong.
+    #[test]
+    fn chacha_method_round_trips() {
+        let mut udp = Udp2022::new(Method::Blake3ChaCha20Poly1305, &PSK32).unwrap();
+        let packet = udp
+            .encrypt_server_packet(7, 3, 0x1234, "1.2.3.4", 53, b"reply")
+            .unwrap();
+        let decoded = udp.decrypt_server_packet(&packet).unwrap();
+        assert_eq!(decoded.server_session_id, 7);
+        assert_eq!(decoded.packet_id, 3);
+        assert_eq!(decoded.client_session_id, 0x1234);
+        assert_eq!(&decoded.payload[..], b"reply");
+
+        assert!(
+            udp.cached_subkey.is_none(),
+            "chacha must not use the subkey cache"
+        );
     }
 }

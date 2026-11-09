@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
 use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures_channel::mpsc::{Receiver, Sender, channel};
 use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt, Stream, future::join};
 use socket2::SockAddr;
@@ -22,7 +22,7 @@ use crate::config::{self, Transport};
 use crate::listener;
 use crate::udp_legacy;
 use crate::udp2022::{PacketWindow, Udp2022};
-use crate::util::{COPY_BUFFER_SIZE, generate_raw_addr};
+use crate::util::{COPY_BUFFER_SIZE, generate_raw_addr, random_session_id};
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -100,13 +100,6 @@ impl Udp2022Sessions {
         }
         false
     }
-}
-
-fn random_session_id() -> u64 {
-    let mut buf = [0u8; 8];
-    rand::fill(&mut buf[..]);
-    let id = u64::from_be_bytes(buf);
-    if id == 0 { 1 } else { id }
 }
 
 pub struct Server {
@@ -254,10 +247,10 @@ fn get_original_destination_addr(s: &TcpStream) -> io::Result<SocketAddr> {
 
 struct UdpRelay {
     buf: [u8; MAX_UDP_BUFFER_SIZE],
-    sender: Sender<(Vec<u8>, SocketAddr)>,
-    receiver: Receiver<(Vec<u8>, SocketAddr)>,
+    sender: Sender<(Bytes, SocketAddr)>,
+    receiver: Receiver<(Bytes, SocketAddr)>,
     socket: UdpSocket,
-    recv: Option<(Vec<u8>, SocketAddr)>,
+    recv: Option<(Bytes, SocketAddr)>,
     cipher: Cipher,
     server_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
@@ -265,7 +258,7 @@ struct UdpRelay {
 }
 
 impl UdpRelay {
-    fn poll_send_one(&mut self, cx: &Context, data: (Vec<u8>, SocketAddr)) -> Poll<io::Result<()>> {
+    fn poll_send_one(&mut self, cx: &Context, data: (Bytes, SocketAddr)) -> Poll<io::Result<()>> {
         match self.socket.poll_send_to(cx, &data.0, data.1) {
             Poll::Pending => {
                 self.recv = Some(data);
@@ -332,7 +325,7 @@ async fn proxy_packet(
     buf: Vec<u8>,
     peer_addr: SocketAddr,
     redir_addr: Option<SocketAddr>,
-    mut sender: Sender<(Vec<u8>, SocketAddr)>,
+    mut sender: Sender<(Bytes, SocketAddr)>,
     sessions: Arc<Udp2022Sessions>,
 ) -> io::Result<(u64, u64)> {
     let redir_addr = if let Some(redir_addr) = redir_addr {
@@ -383,10 +376,10 @@ async fn proxy_packet_2022(
     buf: Vec<u8>,
     redir_addr: SocketAddr,
     peer_addr: SocketAddr,
-    mut sender: Sender<(Vec<u8>, SocketAddr)>,
+    mut sender: Sender<(Bytes, SocketAddr)>,
     sessions: Arc<Udp2022Sessions>,
 ) -> io::Result<(u64, u64)> {
-    let udp = Udp2022::new(cipher.method(), cipher.key())?;
+    let mut udp = Udp2022::new(cipher.method(), cipher.key())?;
     let (client_session_id, packet_id) = sessions.next_packet_id(peer_addr);
     let data = udp.encrypt_client_packet(
         client_session_id,
