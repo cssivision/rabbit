@@ -23,7 +23,7 @@ use aes::{Aes128, Aes256, Block};
 use bytes::{Buf, Bytes};
 
 use crate::cipher::{Cipher, Method, udp_open, udp_seal};
-use crate::util::{derive_blake3_subkey, generate_raw_addr};
+use crate::util::{derive_blake3_subkey, generate_raw_addr, parse_address};
 
 /// Client -> server packet.
 const CLIENT_TYPE: u8 = 0;
@@ -192,7 +192,8 @@ impl Udp2022 {
         }
         check_timestamp(plaintext.try_get_u64()?)?;
         skip_padding(&mut plaintext)?;
-        let (host, port) = read_address(&mut plaintext)?;
+        let (consumed, host, port) = parse_address(&plaintext)?;
+        plaintext.advance(consumed);
 
         Ok(ClientPacket {
             client_session_id: session_id,
@@ -226,7 +227,8 @@ impl Udp2022 {
         check_timestamp(plaintext.try_get_u64()?)?;
         let client_session_id = plaintext.try_get_u64()?;
         skip_padding(&mut plaintext)?;
-        let (host, port) = read_address(&mut plaintext)?;
+        let (consumed, host, port) = parse_address(&plaintext)?;
+        plaintext.advance(consumed);
 
         Ok(ServerPacket {
             server_session_id: session_id,
@@ -480,17 +482,6 @@ fn skip_padding(cursor: &mut Bytes) -> io::Result<()> {
     }
     cursor.advance(n);
     Ok(())
-}
-
-/// Read a SOCKS5 address: `[atyp][addr][port]`.
-///
-/// Delegates to the legacy UDP codec's parser, which is where this framing is
-/// already implemented, and advances the cursor by the number of bytes it
-/// reports consuming.
-fn read_address(cursor: &mut Bytes) -> io::Result<(String, u16)> {
-    let (consumed, host, port) = crate::util::parse_address(cursor)?;
-    cursor.advance(consumed);
-    Ok((host, port))
 }
 
 #[cfg(test)]
