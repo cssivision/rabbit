@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::timeout;
-use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
+use awak::util::{IdleTimeout, copy_bidirectional_with_sizes};
 use bytes::Bytes;
 use futures_channel::mpsc::{Receiver, Sender, channel};
 use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, Stream, future::join};
@@ -638,7 +638,7 @@ where
     log::debug!("connected to addr {}:{}", addr, port);
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional_with_buffer_size(&mut socket2, socket1, COPY_BUFFER_SIZE),
+        copy_bidirectional_with_sizes(&mut socket2, socket1, COPY_BUFFER_SIZE),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )

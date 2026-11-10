@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use awak::net::TcpStream;
 use awak::time::timeout;
-use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
+use awak::util::{IdleTimeout, copy_bidirectional_with_sizes};
 use bytes::BytesMut;
 use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
@@ -94,7 +94,7 @@ where
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional_with_buffer_size(socket1, &mut socket2, COPY_BUFFER_SIZE),
+        copy_bidirectional_with_sizes(socket1, &mut socket2, COPY_BUFFER_SIZE),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )

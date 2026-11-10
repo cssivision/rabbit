@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use awak::net::{TcpStream, UdpSocket};
 use awak::time::{interval, timeout};
-use awak::util::{IdleTimeout, copy_bidirectional_with_buffer_size};
+use awak::util::{IdleTimeout, copy_bidirectional_with_sizes};
 use bytes::{Bytes, BytesMut};
 use futures_channel::mpsc::{Receiver, Sender, channel};
 use futures_util::{AsyncRead, AsyncWrite, AsyncWriteExt, Stream, future::join};
@@ -449,7 +449,7 @@ where
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional_with_buffer_size(socket1, &mut socket2, COPY_BUFFER_SIZE),
+        copy_bidirectional_with_sizes(socket1, &mut socket2, COPY_BUFFER_SIZE),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )
