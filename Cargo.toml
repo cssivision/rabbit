@@ -4,7 +4,6 @@ version = "0.10.0"
 authors = ["cssivision <cssivision@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/cssivision/rabbit"
-homepage = "https://github.com/cssivision/rabbit"
 description = "personal VPN in rust."
 readme = "README.md"
 edition = "2024"
