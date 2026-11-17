@@ -122,6 +122,7 @@ impl Listener {
             }
             Listener::Tcp(lis) => {
                 let (stream, addr) = lis.accept().await?;
+                let _ = stream.set_nodelay(true);
                 log::debug!("accept stream from addr {:?}", addr);
                 Ok(Stream::Tcp(stream))
             }
