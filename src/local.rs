@@ -13,7 +13,7 @@ use crate::cipher::Cipher;
 use crate::config;
 use crate::listener::Listener;
 use crate::socks5;
-use crate::util::{COPY_BUFFER_SIZE, generate_raw_addr};
+use crate::util::generate_raw_addr;
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -83,6 +83,7 @@ where
     log::debug!("connected to server {}", server_addr);
 
     let is_aead2022 = cipher.is_aead2022();
+    let copy_chunk = cipher.max_payload_size();
     let mut socket2 = CipherStream::local(cipher, &mut socket2);
 
     let mut rawaddr = generate_raw_addr(&host, port);
@@ -94,7 +95,7 @@ where
     socket2.write_all(&rawaddr).await?;
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional_with_sizes(socket1, &mut socket2, COPY_BUFFER_SIZE),
+        copy_bidirectional_with_sizes(socket1, &mut socket2, copy_chunk),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )

@@ -22,7 +22,7 @@ use crate::listener::{self, Listener};
 use crate::resolver::resolve;
 use crate::udp_legacy;
 use crate::udp2022::{PacketWindow, Udp2022};
-use crate::util::{COPY_BUFFER_SIZE, random_session_id, read_address};
+use crate::util::{random_session_id, read_address};
 use crate::{DEFAULT_CHECK_INTERVAL, DEFAULT_IDLE_TIMEOUT};
 
 const DEFAULT_READ_ADDRESS_TIMEOUT: Duration = Duration::from_secs(1);
@@ -609,6 +609,7 @@ where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     let is_aead2022 = cipher.is_aead2022();
+    let copy_chunk = cipher.max_payload_size();
     let socket1 = &mut CipherStream::remote(cipher, socket1);
     let (_, host, port) = timeout(DEFAULT_READ_ADDRESS_TIMEOUT, read_address(socket1))
         .await
@@ -638,7 +639,7 @@ where
     log::debug!("connected to addr {}:{}", addr, port);
 
     let (n1, n2) = IdleTimeout::new(
-        copy_bidirectional_with_sizes(&mut socket2, socket1, COPY_BUFFER_SIZE),
+        copy_bidirectional_with_sizes(&mut socket2, socket1, copy_chunk),
         DEFAULT_IDLE_TIMEOUT,
         DEFAULT_CHECK_INTERVAL,
     )
