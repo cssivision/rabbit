@@ -674,7 +674,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lru_cache"
 version = "0.1.0"
-source = "git+https://github.com/cssivision/lru_cache.git#95637079c02ff1ede4c7958f61d53884962b2b3a"
+source = "git+https://github.com/cssivision/lru_cache.git?tag=0.1.0#6a6dda9c9aca04b6c8482ecd490904d1607791ad"
 dependencies = [
  "awak",
 ]

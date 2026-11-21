@@ -19,7 +19,7 @@ rand = "0.10"
 md5 = "0.8"
 awak = "0.2.45"
 dns-resolver = "0.3"
-lru_cache = { git = "https://github.com/cssivision/lru_cache.git" }
+lru_cache = { git = "https://github.com/cssivision/lru_cache.git", tag = "0.1.0" }
 aes = "0.9"
 camellia = "0.2"
 socket2 = { version = "0.6", features = ["all"] }
