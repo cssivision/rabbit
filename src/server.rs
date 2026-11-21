@@ -13,7 +13,7 @@ use awak::util::{IdleTimeout, copy_bidirectional_with_sizes};
 use bytes::Bytes;
 use futures_channel::mpsc::{Receiver, Sender, channel};
 use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, Stream, future::join};
-use lru_time_cache::LruCache;
+use lru_cache::Cache;
 
 use crate::CipherStream;
 use crate::cipher::Cipher;
@@ -56,12 +56,12 @@ const UDP_FLOW_QUEUE: usize = 1024;
 /// every response with an increasing packet id, so the server has to remember
 /// both for the lifetime of the session.
 ///
-/// Like the flow table this is an `LruCache`, so both the idle timeout and the
+/// Like the flow table this uses the shared `Cache`, so both the idle timeout and the
 /// entry count are bounded without a background sweep: every `accept`/`next`
 /// call prunes expired sessions, which is enough because a session is only
 /// reachable through a packet.
 struct Udp2022Sessions {
-    inner: Mutex<LruCache<u64, Udp2022Session>>,
+    inner: Mutex<Cache<u64, Udp2022Session>>,
 }
 
 struct Udp2022Session {
@@ -73,7 +73,7 @@ struct Udp2022Session {
 impl Udp2022Sessions {
     fn new() -> Udp2022Sessions {
         Udp2022Sessions {
-            inner: Mutex::new(LruCache::with_expiry_duration_and_capacity(
+            inner: Mutex::new(Cache::new(
                 DEFAULT_UDP2022_SESSION_TIMEOUT,
                 MAX_UDP2022_SESSIONS,
             )),
@@ -443,7 +443,7 @@ struct UdpRelay {
     sessions: Arc<Udp2022Sessions>,
     /// Outbound flows, keyed by client/destination.
     ///
-    /// `LruCache` bounds the table two ways at once: an entry expires once it
+    /// `Cache` bounds the table two ways at once: an entry expires once it
     /// has been unused for `DEFAULT_UDP_FLOW_TIMEOUT`, and the least recently
     /// used entry is dropped when the table is at `MAX_UDP_FLOWS`. That matters
     /// because a forged source address creates a flow on first use, so without a
@@ -453,12 +453,12 @@ struct UdpRelay {
     ///
     /// A plain field rather than a lock: only `poll` touches it, and that runs
     /// on one task.
-    flows: LruCache<UdpKey, UdpEntry>,
+    flows: Cache<UdpKey, UdpEntry>,
 }
 
 impl UdpRelay {
     fn new(socket: UdpSocket, cipher: Cipher) -> io::Result<UdpRelay> {
-        // Both tables are LruCaches, so they prune themselves on access: there
+        // Both tables use `Cache`, so they prune themselves on access: there
         // is no background sweep. A flow's socket is freed by its own reply
         // loop timing out, and a session is unreachable without a packet.
         let sessions = Arc::new(Udp2022Sessions::new());
@@ -470,10 +470,7 @@ impl UdpRelay {
             cipher,
             udp2022,
             sessions,
-            flows: LruCache::with_expiry_duration_and_capacity(
-                DEFAULT_UDP_FLOW_TIMEOUT,
-                MAX_UDP_FLOWS,
-            ),
+            flows: Cache::new(DEFAULT_UDP_FLOW_TIMEOUT, MAX_UDP_FLOWS),
         })
     }
 
@@ -667,8 +664,7 @@ mod tests {
     /// evicted, not the newest packet dropped.
     #[test]
     fn nat_evicts_least_recently_used_flow() {
-        let mut flows: LruCache<UdpKey, UdpEntry> =
-            LruCache::with_expiry_duration_and_capacity(DEFAULT_UDP_FLOW_TIMEOUT, 4);
+        let mut flows: Cache<UdpKey, UdpEntry> = Cache::new(DEFAULT_UDP_FLOW_TIMEOUT, 4);
 
         for i in 0..4u16 {
             let (tx, _rx) = channel(1);
@@ -678,14 +674,14 @@ mod tests {
 
         // Touch flow 0 so it stops being the least recently used, then add a
         // fifth flow: flow 1 is now the oldest and must be the one evicted.
-        assert!(flows.get(&key_of(0)).is_some());
+        assert!(flows.get_ref(&key_of(0)).is_some());
         let (tx, _rx) = channel(1);
         flows.insert(key_of(9), UdpEntry { sender: tx });
 
         assert_eq!(flows.len(), 4, "table grew past its cap");
-        assert!(flows.get(&key_of(9)).is_some(), "new flow missing");
-        assert!(flows.get(&key_of(0)).is_some(), "recent flow evicted");
-        assert!(flows.get(&key_of(1)).is_none(), "LRU flow kept");
+        assert!(flows.get_ref(&key_of(9)).is_some(), "new flow missing");
+        assert!(flows.get_ref(&key_of(0)).is_some(), "recent flow evicted");
+        assert!(flows.get_ref(&key_of(1)).is_none(), "LRU flow kept");
     }
 
     /// A session that is still fresh must survive the pruning that happens on
@@ -706,8 +702,7 @@ mod tests {
     #[test]
     fn sessions_evict_least_recently_used() {
         let sessions = Udp2022Sessions::new();
-        *sessions.inner.lock().unwrap() =
-            LruCache::with_expiry_duration_and_capacity(DEFAULT_UDP2022_SESSION_TIMEOUT, 4);
+        *sessions.inner.lock().unwrap() = Cache::new(DEFAULT_UDP2022_SESSION_TIMEOUT, 4);
 
         for id in 0..4u64 {
             assert!(sessions.accept(id, 1));
@@ -720,9 +715,9 @@ mod tests {
 
         let mut inner = sessions.inner.lock().unwrap();
         assert_eq!(inner.len(), 4, "table grew past its cap");
-        assert!(inner.get(&9).is_some(), "new session missing");
-        assert!(inner.get(&0).is_some(), "recent session evicted");
-        assert!(inner.get(&1).is_none(), "LRU session kept");
+        assert!(inner.get_ref(&9).is_some(), "new session missing");
+        assert!(inner.get_ref(&0).is_some(), "recent session evicted");
+        assert!(inner.get_ref(&1).is_none(), "LRU session kept");
     }
 
     /// Replay detection must survive pruning: a duplicate id is still rejected
