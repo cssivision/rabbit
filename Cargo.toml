@@ -18,7 +18,8 @@ getopts = "0.2"
 rand = "0.10"
 md5 = "0.8"
 awak = "0.2.45"
-dns-resolver = { version = "0.2", default-features = false, features = ["awak-runtime"] }
+dns-resolver = "0.3"
+lru_cache = { git = "https://github.com/cssivision/lru_cache.git", tag = "0.1.0" }
 aes = "0.9"
 camellia = "0.2"
 socket2 = { version = "0.6", features = ["all"] }
@@ -38,4 +39,3 @@ hkdf = "0.13"
 sha1 = "0.11"
 bytes = "1.0"
 base64 = "0.23"
-lru_time_cache = "0.11"
